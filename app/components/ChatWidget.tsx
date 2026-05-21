@@ -71,7 +71,8 @@ export default function ChatWidget() {
   const [products, setProducts] = useState<Product[]>([])
   const [warehouses, setWarehouses] = useState<Warehouse[]>([])
   const [inventory, setInventory] = useState<InventoryItem[]>([])
-  const [todayTransactions, setTodayTransactions] = useState<{type: string; quantity: number; products: {product_name: string}; warehouses: {name: string}; channel: string | null; note: string | null; created_at: string}[]>([])
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const [todayTransactions, setTodayTransactions] = useState<any[]>([])
   const [messages, setMessages] = useState<Message[]>(DEFAULT_CHAT_MESSAGES)
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
