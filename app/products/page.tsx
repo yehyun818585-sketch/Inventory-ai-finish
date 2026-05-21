@@ -124,7 +124,7 @@ export default function ProductsPage() {
   return (
     <>
       <Navbar />
-      <div className="min-h-screen bg-slate-50 pt-20 p-8">
+      <div className="min-h-screen bg-slate-50 pt-24 md:pt-20 p-4 md:p-8">
       <div className="max-w-6xl mx-auto">
         {/* 헤더 */}
         <div className="flex justify-between items-center mb-8">
@@ -244,7 +244,8 @@ export default function ProductsPage() {
                 등록된 제품이 없습니다. 위 버튼을 눌러 제품을 등록해주세요.
               </p>
             ) : (
-              <table className="w-full">
+              <div className="overflow-x-auto -mx-2">
+              <table className="w-full min-w-[600px]">
                 <thead>
                   <tr className="text-left text-gray-500 border-b">
                     <th className="pb-3">제품군</th>
@@ -319,6 +320,7 @@ export default function ProductsPage() {
                   ))}
                 </tbody>
               </table>
+              </div>
             )}
           </div>
         </div>

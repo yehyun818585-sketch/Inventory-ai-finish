@@ -104,7 +104,7 @@ export default function SettingsPage() {
   return (
     <>
       <Navbar />
-      <div className="min-h-screen bg-slate-50 pt-20 p-8">
+      <div className="min-h-screen bg-slate-50 pt-24 md:pt-20 p-4 md:p-8">
       <div className="max-w-2xl mx-auto">
         <div className="mb-8">
           <h1 className="text-2xl font-bold text-gray-900">회사 설정</h1>

@@ -312,7 +312,7 @@ export default function ReportPage() {
   return (
     <>
       <Navbar />
-      <div className="min-h-screen bg-slate-50 pt-20 p-6">
+      <div className="min-h-screen bg-slate-50 pt-24 md:pt-20 p-4 md:p-6">
       <div className="max-w-5xl mx-auto">
 
         {/* Header */}

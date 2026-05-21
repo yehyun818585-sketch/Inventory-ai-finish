@@ -302,7 +302,7 @@ export default function Home() {
   return (
     <>
       <Navbar />
-      <div className="min-h-screen bg-slate-50 pt-20">
+      <div className="min-h-screen bg-slate-50 pt-24 md:pt-20">
         <div className="max-w-7xl mx-auto px-6 py-8">
 
           {/* ── KPI 카드 4개 ── */}
