@@ -21,8 +21,10 @@ interface InventoryItem {
   warehouse_id: string
   quantity: number
   lot_number?: string
-  products: { product_name: string }
-  warehouses: { name: string }
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  products: any
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  warehouses: any
 }
 
 interface Message {
