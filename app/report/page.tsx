@@ -316,16 +316,16 @@ export default function ReportPage() {
       <div className="max-w-5xl mx-auto">
 
         {/* Header */}
-        <div className="mb-6">
-          <div className="flex items-center justify-between">
+        <div className="mb-4">
+          <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
-              <h1 className="text-2xl font-bold text-gray-900">AI 분석 리포트</h1>
-              <p className="text-gray-500 mt-1">재고 현황을 AI가 분석해 인사이트를 제공합니다</p>
+              <h1 className="text-xl font-bold text-gray-900">AI 분석 리포트</h1>
+              <p className="text-gray-500 text-sm mt-0.5">재고 현황을 AI가 분석해 인사이트를 제공합니다</p>
             </div>
             <button
               onClick={generateReport}
               disabled={loading}
-              className="bg-blue-600 text-white px-6 py-3 rounded-xl font-medium hover:bg-blue-700 disabled:opacity-50 transition flex items-center gap-2"
+              className="bg-blue-600 text-white px-3 py-1.5 md:px-5 md:py-2 text-sm rounded-lg font-medium hover:bg-blue-700 disabled:opacity-50 transition flex items-center gap-1.5 shrink-0"
             >
               {loading ? (
                 <>

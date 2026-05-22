@@ -77,6 +77,19 @@ export default function ChatWidget() {
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
   const [pendingAction, setPendingAction] = useState<Message['data'] | null>(null)
+  const [chatBottom, setChatBottom] = useState(96)
+
+  useEffect(() => {
+    const vv = window.visualViewport
+    if (!vv) return
+    const update = () => {
+      const keyboardH = window.innerHeight - vv.height - vv.offsetTop
+      setChatBottom(Math.max(16, keyboardH + 16))
+    }
+    vv.addEventListener('resize', update)
+    vv.addEventListener('scroll', update)
+    return () => { vv.removeEventListener('resize', update); vv.removeEventListener('scroll', update) }
+  }, [])
 
   interface PendingPartial {
     actionData: NonNullable<Message['data']>
@@ -918,7 +931,7 @@ export default function ChatWidget() {
 
       {/* 채팅 창 */}
       {isOpen && (
-        <div className="fixed bottom-24 right-4 w-[320px] sm:w-96 h-[480px] bg-white rounded-lg shadow-2xl flex flex-col z-50 border">
+        <div className="fixed right-4 w-[310px] sm:w-96 h-[420px] bg-white rounded-lg shadow-2xl flex flex-col z-50 border" style={{ bottom: `${chatBottom}px` }}>
           {/* 헤더 */}
           <div className="bg-blue-600 text-white p-3 rounded-t-lg flex items-center justify-between shrink-0">
             <h3 className="font-semibold text-sm">AI 재고관리 어시스턴트</h3>

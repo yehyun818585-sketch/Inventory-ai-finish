@@ -127,13 +127,11 @@ export default function ProductsPage() {
       <div className="min-h-screen bg-slate-50 pt-24 md:pt-20 p-4 md:p-8">
       <div className="max-w-6xl mx-auto">
         {/* 헤더 */}
-        <div className="flex justify-between items-center mb-8">
-          <div>
-            <h1 className="text-2xl font-bold text-gray-900">제품 관리</h1>
-          </div>
+        <div className="flex flex-wrap justify-between items-start gap-3 mb-6">
+          <h1 className="text-xl font-bold text-gray-900">제품 관리</h1>
           <button
             onClick={() => setShowForm(!showForm)}
-            className="bg-blue-600 text-white px-6 py-3 rounded-lg hover:bg-blue-700 transition"
+            className="bg-blue-600 text-white px-3 py-1.5 md:px-5 md:py-2 text-sm rounded-lg hover:bg-blue-700 transition shrink-0"
           >
             {showForm ? '취소' : '+ 제품 등록'}
           </button>

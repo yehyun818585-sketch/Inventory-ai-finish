@@ -332,14 +332,14 @@ export default function PlansPage() {
       <div className="min-h-screen bg-slate-50 pt-24 md:pt-20 p-4 md:p-6">
       <div className="max-w-5xl mx-auto">
         {/* 헤더 */}
-        <div className="flex justify-between items-center mb-6">
+        <div className="flex flex-wrap justify-between items-start gap-3 mb-4">
           <div>
-            <h1 className="text-2xl font-bold text-gray-900">기획 관리</h1>
-            <p className="text-sm text-gray-500 mt-1">채널별 기획세트 구성 · 원가 · 정산 시뮬레이션</p>
+            <h1 className="text-xl font-bold text-gray-900">기획 관리</h1>
+            <p className="text-xs text-gray-500 mt-0.5">채널별 기획세트 구성 · 원가 · 정산 시뮬레이션</p>
           </div>
           <button
             onClick={() => setShowForm(!showForm)}
-            className="bg-blue-600 text-white px-5 py-2.5 rounded-lg hover:bg-blue-700 transition text-sm font-medium"
+            className="bg-blue-600 text-white px-3 py-1.5 md:px-5 md:py-2 text-sm rounded-lg hover:bg-blue-700 transition font-medium shrink-0"
           >
             {showForm ? '취소' : '+ 새 기획 등록'}
           </button>
