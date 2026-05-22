@@ -475,24 +475,17 @@ export default function LotsPage() {
                   {/* 제품 헤더 (클릭으로 펼침/접힘) */}
                   <button
                     onClick={() => toggleProduct(group.product.id)}
-                    className="w-full px-5 py-4 flex items-center justify-between hover:bg-gray-50 transition"
+                    className="w-full px-3 py-2.5 flex items-center justify-between hover:bg-gray-50 transition"
                   >
-                    <div className="flex items-center gap-3">
+                    <div className="flex items-center gap-2">
                       {getProductStatusIndicator(group.worstStatus)}
-                      <span className={`text-sm transition-transform duration-200 ${isExpanded ? 'rotate-90' : ''}`}>
-                        ▶
-                      </span>
+                      <span className={`text-xs transition-transform duration-200 ${isExpanded ? 'rotate-90' : ''}`}>▶</span>
                       <div className="text-left">
-                        <h3 className="font-semibold text-gray-900">
-                          {group.product.product_name}
-                        </h3>
-                        <p className="text-sm text-gray-500">{group.product.product_code}</p>
+                        <h3 className="font-medium text-sm text-gray-900">{group.product.product_name}</h3>
+                        <p className="text-xs text-gray-400">{group.product.product_code} · {group.lots.length}개 로트</p>
                       </div>
-                      <span className="text-xs text-gray-400 ml-2">
-                        {group.lots.length}개 로트
-                      </span>
                     </div>
-                    <span className="text-lg font-bold text-blue-600">
+                    <span className="text-sm font-bold text-blue-600">
                       {group.totalQuantity.toLocaleString()}개
                     </span>
                   </button>

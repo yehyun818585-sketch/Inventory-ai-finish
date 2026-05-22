@@ -335,7 +335,7 @@ export default function Home() {
 
           {/* ── AI 운영 브리핑 ── */}
           {briefing && (
-            <div className="bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200 rounded-2xl p-5 mb-6">
+            <div className="bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200 rounded-xl p-3 md:p-5 mb-4">
               <div className="flex items-center gap-2 mb-3">
                 <span className="text-blue-600 font-bold text-sm">🤖 AI 운영 브리핑</span>
                 <span className="text-xs text-blue-400">{new Date().toLocaleDateString('ko-KR')} 기준</span>
@@ -390,7 +390,7 @@ export default function Home() {
           )}
 
           {/* ── AI 커맨드 바 ── */}
-          <div className="bg-white border border-gray-200 rounded-2xl p-5 mb-6 shadow-sm">
+          <div className="bg-white border border-gray-200 rounded-xl p-3 md:p-5 mb-4 shadow-sm">
             <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-3">💬 AI에게 바로 명령하세요</p>
             <form onSubmit={handleCommandSubmit} className="flex gap-3">
               <input

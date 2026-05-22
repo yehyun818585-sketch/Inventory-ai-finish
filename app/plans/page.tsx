@@ -562,7 +562,7 @@ export default function PlansPage() {
 
               return (
                 <div key={plan.id} className={`bg-white rounded-xl shadow overflow-hidden ${!plan.is_active ? 'opacity-60' : ''}`}>
-                  <div className="p-5 cursor-pointer hover:bg-gray-50 transition"
+                  <div className="p-3 md:p-5 cursor-pointer hover:bg-gray-50 transition"
                     onClick={() => setExpandedPlan(isExpanded ? null : plan.id)}>
                     <div className="flex items-start justify-between">
                       <div>
@@ -585,7 +585,7 @@ export default function PlansPage() {
                       </div>
                       <div className="text-right shrink-0 ml-4">
                         <div className="text-xs text-gray-400">출고원가</div>
-                        <div className="text-lg font-bold text-gray-900">{plan.total_cost.toLocaleString()}원</div>
+                        <div className="text-sm md:text-lg font-bold text-gray-900">{plan.total_cost.toLocaleString()}원</div>
                         {plan.selling_price > 0 && (
                           <>
                             <div className="text-xs text-gray-500">판매가 {plan.selling_price.toLocaleString()}원</div>

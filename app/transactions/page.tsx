@@ -1007,9 +1007,9 @@ export default function TransactionsPage() {
                   }
 
                   return (
-                  <div key={tx.id} className="flex items-center justify-between border-b pb-4">
-                    <div className="flex items-center gap-4">
-                      <span className={`px-3 py-1 rounded-full text-sm font-medium ${
+                  <div key={tx.id} className="flex items-center justify-between border-b py-2">
+                    <div className="flex items-center gap-2">
+                      <span className={`px-2 py-0.5 rounded text-xs font-medium shrink-0 ${
                         isTransfer
                           ? 'bg-blue-100 text-blue-800'
                           : tx.type === '입고'
@@ -1021,11 +1021,11 @@ export default function TransactionsPage() {
                         {displayType}
                         {tx.sub_type && ` (${tx.sub_type})`}
                       </span>
-                      <div>
-                        <p className="font-medium">
+                      <div className="min-w-0">
+                        <p className="font-medium text-sm truncate">
                           {tx.products?.product_name || '(삭제된 제품)'}
                         </p>
-                        <p className="text-sm text-gray-500">
+                        <p className="text-xs text-gray-500">
                           {isTransfer ? transferInfo : (
                             <>{tx.warehouses?.name} {tx.channel && `→ ${tx.channel}`}</>
                           )}
@@ -1048,9 +1048,9 @@ export default function TransactionsPage() {
                         })()}
                       </div>
                     </div>
-                    <div className="flex items-center gap-4">
+                    <div className="flex items-center gap-2 shrink-0">
                       <div className="text-right">
-                        <p className={`font-semibold text-lg ${
+                        <p className={`font-semibold text-sm ${
                           isTransfer
                             ? 'text-blue-600'
                             : tx.type === '입고'

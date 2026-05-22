@@ -244,83 +244,110 @@ export default function ProductsPage() {
                 등록된 제품이 없습니다. 위 버튼을 눌러 제품을 등록해주세요.
               </p>
             ) : (
-              <div className="overflow-x-auto -mx-2">
-              <table className="w-full min-w-[600px]">
-                <thead>
-                  <tr className="text-left text-gray-500 border-b">
-                    <th className="pb-3">제품군</th>
-                    <th className="pb-3">제품명</th>
-                    <th className="pb-3">품번</th>
-                    <th className="pb-3">버전</th>
-                    <th className="pb-3">원가</th>
-                    <th className="pb-3">채널</th>
-                    <th className="pb-3">상태</th>
-                  </tr>
-                </thead>
-                <tbody>
+              <>
+                {/* 모바일 컴팩트 리스트 */}
+                <div className="md:hidden divide-y">
                   {products.map((product) => (
-                    <tr key={product.id} className={`border-b ${!product.is_active ? 'opacity-50' : ''}`}>
-                      <td className="py-4">{product.product_group}</td>
-                      <td className="py-4 font-medium">{product.product_name}</td>
-                      <td className="py-4 text-gray-500">{product.product_code}</td>
-                      <td className="py-4">
-                        <span className={`px-2 py-1 rounded text-sm ${
-                          product.version === '홈쇼핑용' ? 'bg-purple-100 text-purple-800' :
-                          product.version === '라이브커머스용' ? 'bg-orange-100 text-orange-800' :
-                          'bg-gray-100 text-gray-800'
-                        }`}>
-                          {product.version}
-                        </span>
-                      </td>
-                      <td className="py-4">
-                        {editingCost?.id === product.id ? (
-                          <div className="flex items-center gap-1">
-                            <input
-                              type="number"
-                              autoFocus
-                              value={editingCost.value}
-                              onChange={e => setEditingCost({ id: product.id, value: e.target.value })}
-                              onBlur={() => saveUnitCost(product.id, editingCost.value)}
-                              onKeyDown={e => {
-                                if (e.key === 'Enter') saveUnitCost(product.id, editingCost.value)
-                                if (e.key === 'Escape') setEditingCost(null)
-                              }}
-                              className="w-24 border rounded px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                            />
-                            <span className="text-sm text-gray-500">원</span>
-                          </div>
-                        ) : (
-                          <button
-                            onClick={() => setEditingCost({ id: product.id, value: String(product.unit_cost) })}
-                            className="text-left hover:bg-blue-50 px-2 py-1 rounded transition group"
-                            title="클릭하여 원가 수정"
-                          >
-                            {product.unit_cost > 0
-                              ? <span>{product.unit_cost.toLocaleString()}원</span>
-                              : <span className="text-gray-400 text-sm">미입력 (클릭)</span>
-                            }
-                            <span className="text-blue-400 text-xs ml-1 opacity-0 group-hover:opacity-100">✏️</span>
-                          </button>
-                        )}
-                      </td>
-                      <td className="py-4 text-gray-500">{product.channel || '-'}</td>
-                      <td className="py-4">
+                    <div key={product.id} className={`flex items-center justify-between py-2.5 ${!product.is_active ? 'opacity-50' : ''}`}>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-xs text-gray-400 shrink-0">{product.product_group}</span>
+                          <span className="font-medium text-sm text-gray-900 truncate">{product.product_name}</span>
+                        </div>
+                        <div className="text-xs text-gray-400 mt-0.5">{product.product_code}</div>
+                      </div>
+                      <div className="flex items-center gap-2 shrink-0 ml-2">
+                        <button
+                          onClick={() => setEditingCost({ id: product.id, value: String(product.unit_cost) })}
+                          className="text-xs text-gray-600"
+                        >
+                          {product.unit_cost > 0 ? `${product.unit_cost.toLocaleString()}원` : '미입력'}
+                        </button>
                         <button
                           onClick={() => toggleActive(product.id, product.is_active)}
-                          className={`px-3 py-1 rounded text-sm font-medium ${
-                            product.is_active
-                              ? 'bg-green-100 text-green-800 hover:bg-green-200'
-                              : 'bg-red-100 text-red-800 hover:bg-red-200'
-                          }`}
+                          className={`text-xs px-2 py-0.5 rounded font-medium ${product.is_active ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}
                         >
                           {product.is_active ? '활성' : '비활성'}
                         </button>
-                      </td>
-                    </tr>
+                      </div>
+                    </div>
                   ))}
-                </tbody>
-              </table>
-              </div>
+                </div>
+                {/* 데스크탑 테이블 */}
+                <div className="hidden md:block overflow-x-auto">
+                <table className="w-full min-w-[600px]">
+                  <thead>
+                    <tr className="text-left text-gray-500 border-b">
+                      <th className="pb-3">제품군</th>
+                      <th className="pb-3">제품명</th>
+                      <th className="pb-3">품번</th>
+                      <th className="pb-3">버전</th>
+                      <th className="pb-3">원가</th>
+                      <th className="pb-3">채널</th>
+                      <th className="pb-3">상태</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {products.map((product) => (
+                      <tr key={product.id} className={`border-b ${!product.is_active ? 'opacity-50' : ''}`}>
+                        <td className="py-3">{product.product_group}</td>
+                        <td className="py-3 font-medium">{product.product_name}</td>
+                        <td className="py-3 text-gray-500">{product.product_code}</td>
+                        <td className="py-3">
+                          <span className={`px-2 py-1 rounded text-sm ${
+                            product.version === '홈쇼핑용' ? 'bg-purple-100 text-purple-800' :
+                            product.version === '라이브커머스용' ? 'bg-orange-100 text-orange-800' :
+                            'bg-gray-100 text-gray-800'
+                          }`}>
+                            {product.version}
+                          </span>
+                        </td>
+                        <td className="py-3">
+                          {editingCost?.id === product.id ? (
+                            <div className="flex items-center gap-1">
+                              <input
+                                type="number"
+                                autoFocus
+                                value={editingCost.value}
+                                onChange={e => setEditingCost({ id: product.id, value: e.target.value })}
+                                onBlur={() => saveUnitCost(product.id, editingCost.value)}
+                                onKeyDown={e => {
+                                  if (e.key === 'Enter') saveUnitCost(product.id, editingCost.value)
+                                  if (e.key === 'Escape') setEditingCost(null)
+                                }}
+                                className="w-24 border rounded px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                              />
+                              <span className="text-sm text-gray-500">원</span>
+                            </div>
+                          ) : (
+                            <button
+                              onClick={() => setEditingCost({ id: product.id, value: String(product.unit_cost) })}
+                              className="text-left hover:bg-blue-50 px-2 py-1 rounded transition group"
+                            >
+                              {product.unit_cost > 0
+                                ? <span>{product.unit_cost.toLocaleString()}원</span>
+                                : <span className="text-gray-400 text-sm">미입력</span>
+                              }
+                            </button>
+                          )}
+                        </td>
+                        <td className="py-3 text-gray-500">{product.channel || '-'}</td>
+                        <td className="py-3">
+                          <button
+                            onClick={() => toggleActive(product.id, product.is_active)}
+                            className={`px-3 py-1 rounded text-sm font-medium ${
+                              product.is_active ? 'bg-green-100 text-green-800 hover:bg-green-200' : 'bg-red-100 text-red-800 hover:bg-red-200'
+                            }`}
+                          >
+                            {product.is_active ? '활성' : '비활성'}
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                </div>
+              </>
             )}
           </div>
         </div>
