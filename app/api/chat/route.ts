@@ -282,8 +282,8 @@ async function executeTool(name: string, args: Record<string, string>, companyId
       .from('product_plans')
       .select(`id, name, channel, commission_rate, event_discount_rate, selling_price, assembly_cost, total_cost,
         plan_items(quantity, unit_cost, products(id, product_name, product_code))`)
-      .eq('company_id', companyId)
-      .eq('is_active', true)
+      .or(`company_id.eq.${companyId},company_id.is.null`)
+      .neq('is_active', false)
     if (args.search) query = query.ilike('name', `%${args.search}%`)
     const { data } = await query
     // eslint-disable-next-line @typescript-eslint/no-explicit-any

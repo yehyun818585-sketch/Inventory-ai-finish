@@ -285,6 +285,7 @@ export default function PlansPage() {
         target_margin_rate: formData.target_margin_rate / 100,
         assembly_cost: formData.assembly_cost,
         total_cost: totalCost,
+        is_active: true,
         company_id: profile?.company_id
       }])
       .select('id')
