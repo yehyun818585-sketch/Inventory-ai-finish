@@ -110,19 +110,19 @@ export default function LotsPage() {
 
   useEffect(() => {
     fetchData()
+  }, [profile?.company_id]) // eslint-disable-line react-hooks/exhaustive-deps
 
-    // inventory 테이블 변경 시 자동 새로고침
+  useEffect(() => {
+    if (!profile?.company_id) return
+
     const channel = supabase
-      .channel('lots-inventory-changes')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'inventory' }, () => {
-        fetchData()
-      })
+      .channel(`lots-realtime-${profile.company_id}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'inventory' }, () => fetchData())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'products' }, () => fetchData())
       .subscribe()
 
-    return () => {
-      supabase.removeChannel(channel)
-    }
-  }, [])
+    return () => { supabase.removeChannel(channel) }
+  }, [profile?.company_id]) // eslint-disable-line react-hooks/exhaustive-deps
 
   function toggleProduct(productId: string) {
     setExpandedProducts(prev => {

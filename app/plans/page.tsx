@@ -121,7 +121,20 @@ export default function PlansPage() {
 
   useEffect(() => {
     fetchData()
-  }, [profile?.company_id])
+  }, [profile?.company_id]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (!profile?.company_id) return
+
+    const channel = supabase
+      .channel(`plans-realtime-${profile.company_id}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'inventory' }, () => fetchData())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'product_plans' }, () => fetchData())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'products' }, () => fetchData())
+      .subscribe()
+
+    return () => { supabase.removeChannel(channel) }
+  }, [profile?.company_id]) // eslint-disable-line react-hooks/exhaustive-deps
 
   async function fetchData() {
     if (!profile?.company_id) return

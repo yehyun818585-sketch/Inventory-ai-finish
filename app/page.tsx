@@ -112,9 +112,10 @@ export default function Home() {
   useEffect(() => {
     if (!profile?.company_id) return
     const ch = supabase
-      .channel('realtime-home')
+      .channel(`home-realtime-${profile.company_id}`)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'inventory' }, fetchData)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'transactions' }, fetchData)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'products' }, fetchData)
       .subscribe()
     return () => { supabase.removeChannel(ch) }
   }, [profile?.company_id])

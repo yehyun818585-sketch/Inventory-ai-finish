@@ -73,6 +73,17 @@ export default function ReportPage() {
     prefetchChartData()
   }, [profile?.company_id])
 
+  useEffect(() => {
+    if (!profile?.company_id) return
+
+    const channel = supabase
+      .channel(`report-realtime-${profile.company_id}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'inventory' }, () => prefetchChartData())
+      .subscribe()
+
+    return () => { supabase.removeChannel(channel) }
+  }, [profile?.company_id]) // eslint-disable-line react-hooks/exhaustive-deps
+
   async function prefetchChartData() {
     if (!profile?.company_id) return
 

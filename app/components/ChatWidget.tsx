@@ -70,7 +70,7 @@ export default function ChatWidget() {
   const [isOpen, setIsOpen] = useState(false)
   const [products, setProducts] = useState<Product[]>([])
   const [warehouses, setWarehouses] = useState<Warehouse[]>([])
-  const [inventory, setInventory] = useState<InventoryItem[]>([])
+  // inventory 상태는 resolveWarehouse에서 실시간 Supabase 직접 조회로 대체됨
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [todayTransactions, setTodayTransactions] = useState<any[]>([])
   const [messages, setMessages] = useState<Message[]>(DEFAULT_CHAT_MESSAGES)
@@ -106,6 +106,29 @@ export default function ChatWidget() {
   useEffect(() => {
     fetchData()
   }, [profile?.company_id])
+
+  // 채팅창 열릴 때마다 최신 데이터로 갱신 (다른 페이지 변경사항 반영)
+  useEffect(() => {
+    if (isOpen && profile?.company_id) {
+      fetchData()
+    }
+  }, [isOpen]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // 실시간 DB 변경 구독 (제품/재고/기획세트 변경 시 자동 갱신)
+  useEffect(() => {
+    if (!profile?.company_id) return
+
+    const channel = supabase
+      .channel(`chat-realtime-${profile.company_id}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'products' }, () => fetchData())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'inventory' }, () => fetchData())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'product_plans' }, () => fetchData())
+      .subscribe()
+
+    return () => {
+      supabase.removeChannel(channel)
+    }
+  }, [profile?.company_id]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // 새로고침(reload) 후에도 대화 복원 — 입출고 확정 시 sessionStorage에 저장함
   useEffect(() => {
@@ -189,12 +212,6 @@ export default function ChatWidget() {
       .select('id, name')
       .eq('company_id', cid)
 
-    const { data: inventoryData } = await supabase
-      .from('inventory')
-      .select('product_id, warehouse_id, quantity, lot_number, products(product_name), warehouses(name)')
-      .gt('quantity', 0)
-      .eq('company_id', cid)
-
     const todayStart = new Date()
     todayStart.setHours(0, 0, 0, 0)
     const { data: txData } = await supabase
@@ -206,7 +223,6 @@ export default function ChatWidget() {
 
     setProducts(productsData || [])
     setWarehouses(warehousesData || [])
-    setInventory(inventoryData || [])
     setTodayTransactions(txData || [])
   }
 
@@ -230,9 +246,15 @@ export default function ChatWidget() {
     if (actionData.action === '입고') {
       availableWarehouses = warehouses
     } else {
-      // 출고/이동: 재고 있는 창고만
-      const productInv = inventory.filter(inv => inv.product_id === confirmedProduct.id && inv.quantity > 0)
-      const warehouseIds = [...new Set(productInv.map(inv => inv.warehouse_id))]
+      // 출고/이동: 최신 재고를 직접 조회해서 재고 있는 창고만 선별
+      const { data: freshInv } = await supabase
+        .from('inventory')
+        .select('warehouse_id')
+        .eq('product_id', confirmedProduct.id)
+        .eq('company_id', profile?.company_id)
+        .gt('quantity', 0)
+
+      const warehouseIds = [...new Set((freshInv || []).map((inv: { warehouse_id: string }) => inv.warehouse_id))]
       availableWarehouses = warehouses.filter(w => warehouseIds.includes(w.id))
 
       if (availableWarehouses.length === 0) {
@@ -588,8 +610,8 @@ export default function ChatWidget() {
       }
 
       const warehouse = warehouses.find(w =>
-        w.name.includes(pendingAction.warehouse || '충주')
-      ) || warehouses[0]
+        w.name.includes(pendingAction.warehouse || '')
+      )
 
       if (!warehouse) {
         setMessages(prev => [...prev, { role: 'assistant', content: '창고를 찾을 수 없습니다.' }])

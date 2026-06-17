@@ -110,21 +110,20 @@ export default function TransactionsPage() {
 
   useEffect(() => {
     fetchData()
+  }, [profile?.company_id]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (!profile?.company_id) return
 
     const channel = supabase
-      .channel('transactions-changes')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'transactions' }, () => {
-        fetchData()
-      })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'inventory' }, () => {
-        fetchData()
-      })
+      .channel(`transactions-realtime-${profile.company_id}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'transactions' }, () => fetchData())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'inventory' }, () => fetchData())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'products' }, () => fetchData())
       .subscribe()
 
-    return () => {
-      supabase.removeChannel(channel)
-    }
-  }, [])
+    return () => { supabase.removeChannel(channel) }
+  }, [profile?.company_id]) // eslint-disable-line react-hooks/exhaustive-deps
 
   async function fetchData() {
     if (!profile?.company_id) return

@@ -36,18 +36,18 @@ export default function ProductsPage() {
 
   useEffect(() => {
     fetchProducts()
+  }, [profile?.company_id]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (!profile?.company_id) return
 
     const channel = supabase
-      .channel('products-changes')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'products' }, () => {
-        fetchProducts()
-      })
+      .channel(`products-realtime-${profile.company_id}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'products' }, () => fetchProducts())
       .subscribe()
 
-    return () => {
-      supabase.removeChannel(channel)
-    }
-  }, [])
+    return () => { supabase.removeChannel(channel) }
+  }, [profile?.company_id]) // eslint-disable-line react-hooks/exhaustive-deps
 
   async function fetchProducts() {
     if (!profile?.company_id) return
