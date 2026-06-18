@@ -463,6 +463,7 @@ export async function POST(request: Request) {
 - 전체 재고에서 사용자가 말한 제품명과 부분 일치하는 제품의 수량 합산
 - 가용 재고 >= 요청 수량 → action:"출고" JSON 즉시 반환
 - 가용 재고 < 요청 수량 → action:"질문"으로 "현재 가용 재고는 N개입니다. N개로 출고할까요?" 안내
+- ★ 대화 이력에 이미 get_inventory 결과가 있고 재고 확인 완료된 경우 → 채널/창고 정보가 오면 즉시 action JSON 반환, get_inventory 재호출 절대 금지
 - 사용자가 목적지/채널 이름을 언급하면 → 그게 곧 channel (외부출고). 절대 다시 묻지 말 것
   예) "올리브영 출고" → channel:"올리브영" / "쿠팡 출고" → channel:"쿠팡"
 - 사용자가 "~창고로 이동", "~로 보내" 등 이동 표현을 쓰면 → action:"창고이동", to_warehouse 설정
@@ -480,6 +481,7 @@ export async function POST(request: Request) {
 - 유사한 기획이 여러 개면 → action:"질문"으로 후보 목록 나열하고 선택 요청
 - 아무것도 못 찾은 경우에도 → action:"질문"으로 전체 기획 목록 나열하고 어떤 기획인지 물어볼 것
 - 절대 "해당 기획을 찾을 수 없습니다"로 끝내지 말 것 — 항상 목록을 보여주고 선택 유도
+- ★ get_plans 결과를 받은 후에는 get_inventory 절대 호출 금지 — 기획 이름 못 찾으면 즉시 action:"질문"으로 전체 목록 안내
 - 사용자가 번호(1, 2, 3...) 또는 기획명으로 선택 응답을 했을 때:
   1. get_plans tool 다시 호출해서 전체 목록 가져오기
   2. 이전 대화에서 나열한 순서 기준으로 n번째 기획 선택
@@ -512,6 +514,8 @@ export async function POST(request: Request) {
 
     // ── Tool Use 루프 ──────────────────────────────────────
     const MAX_ROUNDS = 8
+    let lastToolSig = ''
+    let dupCount = 0
     for (let round = 0; round < MAX_ROUNDS; round++) {
       const completion = await openai.chat.completions.create({
         model: 'gpt-4o-mini',
@@ -557,6 +561,19 @@ export async function POST(request: Request) {
         const args = JSON.parse(tc.function?.arguments || '{}')
         const toolName = tc.function?.name || ''
         console.log(`🔧 [Tool] ${toolName}(${JSON.stringify(args)})`)
+
+        // 연속 중복 tool call 감지 — 같은 호출 3번째면 루프 탈출
+        const sig = `${toolName}:${JSON.stringify(args)}`
+        if (sig === lastToolSig) {
+          dupCount++
+          if (dupCount >= 2) {
+            return NextResponse.json({ action: '질문', message: '처리가 반복되고 있습니다. 요청을 다시 입력해 주세요.' })
+          }
+        } else {
+          lastToolSig = sig
+          dupCount = 0
+        }
+
         const result = await executeTool(toolName, args, company_id)
         console.log(`🔧 [Tool] 결과: ${result.substring(0, 150)}`)
         messages.push({
