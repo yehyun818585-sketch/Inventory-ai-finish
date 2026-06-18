@@ -22,54 +22,6 @@ function toLocalDateStr(date: Date): string {
   return `${yyyy}-${mm}-${dd}`
 }
 
-// AI를 사용하여 비소모품(유통기한 불필요) 제품 분류
-async function classifyPerishableProducts(productNames: string[]): Promise<Set<string>> {
-  if (productNames.length === 0) return new Set()
-
-  try {
-    const response = await openai.chat.completions.create({
-      model: 'gpt-4o-mini',
-      messages: [
-        {
-          role: 'system',
-          content: `당신은 제품 분류 전문가입니다. 제품명 목록을 보고 "유통기한이 필요 없는 제품"을 판별합니다.
-
-유통기한이 필요 없는 제품 예시:
-- 의류/패션: 우산, 파우치, 가방, 모자, 장갑, 양말, 티셔츠
-- 생활용품: 컵, 텀블러, 접시, 그릇, 수저, 케이스, 홀더
-- 문구류: 펜, 노트, 메모장, 스티커
-- 완구/장식: 인형, 피규어, 장난감, 키링, 뱃지
-
-유통기한이 필요한 제품:
-- 식품류: 음료, 과자, 조미료, 소스, 식재료
-- 건강식품: 영양제, 보충제, 건강음료
-- 화장품: 스킨케어, 메이크업 (개봉 후 사용기한)
-
-JSON 형식으로 응답: {"nonPerishable": ["제품명1", "제품명2"]}`
-        },
-        {
-          role: 'user',
-          content: `다음 제품 중 유통기한이 필요 없는 제품만 선택하세요:\n${productNames.join('\n')}`
-        }
-      ],
-      temperature: 0.1,
-      max_tokens: 500
-    })
-
-    const content = response.choices[0]?.message?.content || '{}'
-    const jsonMatch = content.match(/\{[\s\S]*\}/)
-    if (jsonMatch) {
-      const parsed = JSON.parse(jsonMatch[0])
-      console.log('📊 [AI] 비소모품 분류 결과:', parsed.nonPerishable || [])
-      return new Set(parsed.nonPerishable || [])
-    }
-  } catch (error) {
-    console.error('📊 [AI] 제품 분류 에러:', error)
-  }
-
-  return new Set()
-}
-
 // 클라이언트에서 전달받는 데이터 타입
 interface ClientInventoryItem {
   quantity: number
@@ -79,6 +31,7 @@ interface ClientInventoryItem {
   product_group: string
   shelf_life_months: number | null
   warehouse_name: string
+  track_expiry: boolean
 }
 
 interface ClientTransaction {
@@ -206,16 +159,12 @@ export async function POST(request: Request) {
     if (expiringProducts.length === 0 && inventory && inventory.length > 0) {
       console.log('📊 [DEBUG] expiringLots가 없어서 직접 계산...')
 
-      // AI로 비소모품 분류
-      const uniqueProductNames = [...new Set(inventory.map(i => i.product_name).filter(Boolean))]
-      const nonPerishableSet = await classifyPerishableProducts(uniqueProductNames)
-
       inventory.forEach(item => {
+        // track_expiry가 false인 제품은 유통기한 계산 제외
+        if (item.track_expiry === false) return
+
         const lotNumber = item.lot_number
         if (!lotNumber || lotNumber.length < 6) return
-
-        // AI가 분류한 비소모품은 스킵
-        if (nonPerishableSet.has(item.product_name)) return
 
         // 로트번호에서 제조일 추출 (YYMMDD)
         const yy = parseInt(lotNumber.substring(0, 2))

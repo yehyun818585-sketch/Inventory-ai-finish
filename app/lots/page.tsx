@@ -10,6 +10,7 @@ interface Product {
   product_name: string
   product_code: string
   shelf_life_months: number | null
+  track_expiry: boolean
 }
 
 interface Warehouse {
@@ -63,28 +64,6 @@ function parseLotNumber(lotNumber: string | null): Date | null {
   return new Date(year, mm, dd)
 }
 
-// AI를 통해 비소모품 분류 (API 호출)
-async function classifyNonPerishableProducts(productNames: string[]): Promise<Set<string>> {
-  if (productNames.length === 0) return new Set()
-
-  try {
-    const response = await fetch('/api/classify-products', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ productNames })
-    })
-
-    if (response.ok) {
-      const data = await response.json()
-      return new Set(data.nonPerishable || [])
-    }
-  } catch (error) {
-    console.error('제품 분류 API 에러:', error)
-  }
-
-  return new Set()
-}
-
 // 상태 우선순위 (숫자가 낮을수록 위험)
 const STATUS_ORDER = { expired: 0, warning: 1, normal: 2, unknown: 3 } as const
 
@@ -98,9 +77,18 @@ function getWorstStatus(lots: LotGroup[]): LotGroup['status'] {
   return worst
 }
 
+interface ReviewNeededLot {
+  productName: string
+  productCode: string
+  lotNumber: string
+  totalQuantity: number
+  warehouses: { name: string; quantity: number }[]
+}
+
 export default function LotsPage() {
   const { profile } = useAuth()
   const [productGroups, setProductGroups] = useState<ProductGroup[]>([])
+  const [reviewNeededLots, setReviewNeededLots] = useState<ReviewNeededLot[]>([])
   const [loading, setLoading] = useState(true)
   const [filter, setFilter] = useState<'all' | 'warning' | 'expired'>('all')
   const [expandedProducts, setExpandedProducts] = useState<Set<string>>(new Set())
@@ -167,13 +155,6 @@ export default function LotsPage() {
       return
     }
 
-    // AI로 비소모품 분류 (한 번만 호출)
-    const uniqueProductNames = [...new Set(
-      inventoryData.map((item: InventoryItem) => item.products?.product_name).filter(Boolean)
-    )] as string[]
-    const nonPerishableSet = await classifyNonPerishableProducts(uniqueProductNames)
-    console.log('🤖 비소모품으로 분류된 제품:', [...nonPerishableSet])
-
     // 1단계: 제품+로트번호로 로트 그룹 생성
     const lotMap = new Map<string, LotGroup & { product: Product }>()
 
@@ -187,11 +168,9 @@ export default function LotsPage() {
         let daysRemaining: number | null = null
 
         const mfgDate = parseLotNumber(item.lot_number)
+        const trackExpiry = item.products?.track_expiry !== false
 
-        const productName = item.products?.product_name || ''
-        const isNonPerishableProduct = nonPerishableSet.has(productName)
-
-        if (mfgDate && !isNonPerishableProduct) {
+        if (mfgDate && trackExpiry) {
           expiryDate = new Date(mfgDate)
           expiryDate.setMonth(expiryDate.getMonth() + shelfLifeMonths)
 
@@ -281,6 +260,30 @@ export default function LotsPage() {
     })
 
     setProductGroups(sorted)
+
+    // 유통기한 확인 필요: track_expiry=true인데 lot_number가 YYMMDD 형식이 아닌 항목
+    const reviewMap = new Map<string, ReviewNeededLot>()
+    inventoryData.forEach((item: InventoryItem) => {
+      const trackExpiry = item.products?.track_expiry !== false
+      const lotNum = item.lot_number
+      if (!trackExpiry || !lotNum) return
+      if (parseLotNumber(lotNum) !== null) return // 정상 형식이면 제외
+
+      const key = `${item.product_id}_${lotNum}`
+      if (!reviewMap.has(key)) {
+        reviewMap.set(key, {
+          productName: item.products?.product_name || '',
+          productCode: item.products?.product_code || '',
+          lotNumber: lotNum,
+          totalQuantity: 0,
+          warehouses: []
+        })
+      }
+      const r = reviewMap.get(key)!
+      r.totalQuantity += item.quantity
+      r.warehouses.push({ name: item.warehouses?.name || '-', quantity: item.quantity })
+    })
+    setReviewNeededLots(Array.from(reviewMap.values()))
 
     // 임박/만료 로트가 있는 제품은 기본 펼침
     const autoExpand = new Set<string>()
@@ -413,6 +416,35 @@ export default function LotsPage() {
             <p className="text-xs text-gray-400">만료 처리 필요</p>
           </div>
         </div>
+
+        {/* 유통기한 확인 필요 섹션 */}
+        {reviewNeededLots.length > 0 && (
+          <div className="bg-orange-50 border border-orange-300 rounded-lg p-4 mb-4">
+            <h2 className="text-sm font-semibold text-orange-800 mb-2">
+              ⚠️ 유통기한 확인 필요 ({reviewNeededLots.length}건)
+            </h2>
+            <p className="text-xs text-orange-600 mb-3">유통기한 관리 대상이지만 로트번호가 YYMMDD 형식이 아니어서 자동 계산 불가 — 직접 확인 후 처리해 주세요.</p>
+            <div className="space-y-2">
+              {reviewNeededLots.map((r, i) => (
+                <div key={i} className="bg-white border border-orange-200 rounded px-3 py-2 flex items-center justify-between flex-wrap gap-2">
+                  <div>
+                    <span className="font-medium text-sm text-gray-800">{r.productName}</span>
+                    <span className="text-xs text-gray-400 ml-2">{r.productCode}</span>
+                    <span className="ml-2 font-mono text-xs bg-orange-100 text-orange-700 px-1.5 py-0.5 rounded">{r.lotNumber}</span>
+                  </div>
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    {r.warehouses.map((w, j) => (
+                      <span key={j} className="text-xs text-gray-500 bg-gray-100 px-2 py-0.5 rounded">
+                        {w.name} {w.quantity.toLocaleString()}개
+                      </span>
+                    ))}
+                    <span className="text-xs font-bold text-gray-700">총 {r.totalQuantity.toLocaleString()}개</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* 필터 탭 + 검색 */}
         <div className="bg-white rounded-lg shadow mb-6">

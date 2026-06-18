@@ -194,6 +194,10 @@ export default function UploadPage() {
     general_qty: '',
     warehouse_qty: {}
   })
+  const [aiSuggestOff, setAiSuggestOff] = useState<string[]>([])
+  const [aiNeedsReview, setAiNeedsReview] = useState<string[]>([])
+  const [userConfirmedOff, setUserConfirmedOff] = useState<Set<string>>(new Set())
+  const [aiClassifying, setAiClassifying] = useState(false)
 
   // 페이지 로드 시 창고 목록 가져오기
   useEffect(() => {
@@ -406,7 +410,7 @@ export default function UploadPage() {
   }
 
   // 매핑 적용하여 데이터 파싱
-  function applyMappingAndParse() {
+  async function applyMappingAndParse() {
     console.log('🔄 [시작] 매핑 적용 및 데이터 파싱...')
     console.log('📋 [정보] 현재 매핑 설정:', columnMapping)
     console.log(`📊 [정보] 원본 데이터: ${rawData.length}개 행`)
@@ -501,7 +505,30 @@ export default function UploadPage() {
 
     setParsedData(parsed)
     setUploadStep('preview')
+    setUserConfirmedOff(new Set())
     console.log('➡️ [단계] 3단계(미리보기)로 이동')
+
+    // AI 분류 호출 (백그라운드)
+    const uniqueNames = [...new Set(parsed.map(p => p.product_name).filter(Boolean))]
+    if (uniqueNames.length > 0) {
+      setAiClassifying(true)
+      try {
+        const res = await fetch('/api/classify-products', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ productNames: uniqueNames })
+        })
+        if (res.ok) {
+          const data = await res.json()
+          setAiSuggestOff(data.suggest_off || [])
+          setAiNeedsReview(data.needs_review || [])
+        }
+      } catch (e) {
+        console.error('AI 분류 에러:', e)
+      } finally {
+        setAiClassifying(false)
+      }
+    }
   }
 
   async function handleDelete() {
@@ -654,6 +681,7 @@ export default function UploadPage() {
               version: '일반',
               unit_cost: item.unit_cost,
               is_active: true,
+              track_expiry: !userConfirmedOff.has(item.product_name),
               company_id: profile?.company_id
             }])
             .select('id')
@@ -1306,6 +1334,57 @@ export default function UploadPage() {
               </button>
             </div>
           </div>
+        )}
+
+        {/* AI 유통기한 추천 (preview 단계) */}
+        {uploadStep === 'preview' && (
+          <>
+            {aiClassifying && (
+              <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 mb-3 text-sm text-blue-700">
+                AI가 제품을 분석 중입니다...
+              </div>
+            )}
+            {!aiClassifying && aiSuggestOff.length > 0 && (
+              <div className="bg-amber-50 border border-amber-300 rounded-lg p-4 mb-3">
+                <h3 className="text-sm font-semibold text-amber-800 mb-1">유통기한 관리 OFF 추천 ({aiSuggestOff.length}건)</h3>
+                <p className="text-xs text-amber-700 mb-3">아래 제품은 비소모품으로 판단됩니다. OFF로 설정할 제품을 선택하세요. <span className="font-bold">기본값은 ON</span>이며, AI가 자동으로 끄지 않습니다.</p>
+                <div className="space-y-1.5">
+                  {aiSuggestOff.map((name) => (
+                    <label key={name} className="flex items-center gap-2 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={userConfirmedOff.has(name)}
+                        onChange={(e) => {
+                          setUserConfirmedOff(prev => {
+                            const next = new Set(prev)
+                            if (e.target.checked) next.add(name)
+                            else next.delete(name)
+                            return next
+                          })
+                        }}
+                        className="w-4 h-4 accent-amber-600"
+                      />
+                      <span className="text-sm text-gray-800">{name}</span>
+                      {userConfirmedOff.has(name) && (
+                        <span className="text-xs bg-gray-200 text-gray-600 px-1.5 py-0.5 rounded">유통기한 OFF</span>
+                      )}
+                    </label>
+                  ))}
+                </div>
+              </div>
+            )}
+            {!aiClassifying && aiNeedsReview.length > 0 && (
+              <div className="bg-orange-50 border border-orange-300 rounded-lg p-4 mb-3">
+                <h3 className="text-sm font-semibold text-orange-800 mb-1">유통기한 관리 확인 필요 ({aiNeedsReview.length}건)</h3>
+                <p className="text-xs text-orange-700 mb-2">세트/기획 상품 가능성이 있어 유통기한 관리 여부를 직접 확인해 주세요. 업로드 후 제품 관리 페이지에서 변경할 수 있습니다.</p>
+                <div className="flex flex-wrap gap-1.5">
+                  {aiNeedsReview.map((name) => (
+                    <span key={name} className="text-xs bg-orange-100 text-orange-800 px-2 py-0.5 rounded border border-orange-200">{name}</span>
+                  ))}
+                </div>
+              </div>
+            )}
+          </>
         )}
 
         {/* 3단계: 미리보기 및 업로드 */}

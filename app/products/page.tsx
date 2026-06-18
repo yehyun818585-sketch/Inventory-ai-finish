@@ -14,6 +14,7 @@ interface Product {
   unit_cost: number
   channel: string | null
   is_active: boolean
+  track_expiry: boolean
   created_at: string
 }
 
@@ -70,7 +71,8 @@ export default function ProductsPage() {
       .insert([{
         ...formData,
         unit_cost: Number(formData.unit_cost),
-        company_id: profile?.company_id
+        company_id: profile?.company_id,
+        track_expiry: true
       }])
 
     if (error) {
@@ -107,6 +109,20 @@ export default function ProductsPage() {
 
     if (error) {
       alert('상태 변경 실패: ' + error.message)
+      return
+    }
+
+    fetchProducts()
+  }
+
+  async function toggleTrackExpiry(id: string, current: boolean) {
+    const { error } = await supabase
+      .from('products')
+      .update({ track_expiry: !current })
+      .eq('id', id)
+
+    if (error) {
+      alert('유통기한 관리 변경 실패: ' + error.message)
       return
     }
 
@@ -262,6 +278,13 @@ export default function ProductsPage() {
                           {product.unit_cost > 0 ? `${product.unit_cost.toLocaleString()}원` : '미입력'}
                         </button>
                         <button
+                          onClick={() => toggleTrackExpiry(product.id, product.track_expiry)}
+                          className={`text-xs px-2 py-0.5 rounded font-medium ${product.track_expiry ? 'bg-blue-100 text-blue-800' : 'bg-gray-100 text-gray-500'}`}
+                          title="유통기한 관리"
+                        >
+                          {product.track_expiry ? '유통↑' : '유통↓'}
+                        </button>
+                        <button
                           onClick={() => toggleActive(product.id, product.is_active)}
                           className={`text-xs px-2 py-0.5 rounded font-medium ${product.is_active ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}
                         >
@@ -282,6 +305,7 @@ export default function ProductsPage() {
                       <th className="pb-3">버전</th>
                       <th className="pb-3">원가</th>
                       <th className="pb-3">채널</th>
+                      <th className="pb-3">유통기한 관리</th>
                       <th className="pb-3">상태</th>
                     </tr>
                   </thead>
@@ -330,6 +354,16 @@ export default function ProductsPage() {
                           )}
                         </td>
                         <td className="py-3 text-gray-500">{product.channel || '-'}</td>
+                        <td className="py-3">
+                          <button
+                            onClick={() => toggleTrackExpiry(product.id, product.track_expiry)}
+                            className={`px-3 py-1 rounded text-sm font-medium ${
+                              product.track_expiry ? 'bg-blue-100 text-blue-800 hover:bg-blue-200' : 'bg-gray-100 text-gray-500 hover:bg-gray-200'
+                            }`}
+                          >
+                            {product.track_expiry ? 'ON' : 'OFF'}
+                          </button>
+                        </td>
                         <td className="py-3">
                           <button
                             onClick={() => toggleActive(product.id, product.is_active)}

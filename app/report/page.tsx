@@ -133,7 +133,7 @@ export default function ReportPage() {
       const [{ data: inventoryData }, { data: txData }, { data: warehouseData }] = await Promise.all([
         supabase
           .from('inventory')
-          .select('quantity, lot_number, products(product_name, product_code, product_group, shelf_life_months, unit_cost), warehouses(name)')
+          .select('quantity, lot_number, products(product_name, product_code, product_group, shelf_life_months, unit_cost, track_expiry), warehouses(name)')
           .eq('company_id', profile.company_id),
         supabase
           .from('transactions')
@@ -155,6 +155,7 @@ export default function ReportPage() {
       const today = new Date()
       const computed: ExpiringLot[] = []
       inventory.forEach(item => {
+        if (item.products?.track_expiry === false) return
         if (!item.lot_number) return
         const mfgDate = parseLotDate(item.lot_number)
         if (!mfgDate) return
@@ -269,7 +270,8 @@ export default function ReportPage() {
             product_code: i.products?.product_code,
             product_group: i.products?.product_group,
             shelf_life_months: i.products?.shelf_life_months,
-            warehouse_name: i.warehouses?.name
+            warehouse_name: i.warehouses?.name,
+            track_expiry: i.products?.track_expiry !== false
           })),
           transactions: transactions.map(t => ({
             type: t.type,
