@@ -83,6 +83,7 @@ interface ReviewNeededLot {
   lotNumber: string
   totalQuantity: number
   warehouses: { name: string; quantity: number }[]
+  inventoryIds: string[]
 }
 
 export default function LotsPage() {
@@ -95,6 +96,8 @@ export default function LotsPage() {
   const [search, setSearch] = useState('')
   const [companyShelfLife, setCompanyShelfLife] = useState(24)
   const [companyWarningRatio, setCompanyWarningRatio] = useState(0.25)
+  const [editingLot, setEditingLot] = useState<{ key: string; value: string } | null>(null)
+  const [savingLot, setSavingLot] = useState(false)
 
   useEffect(() => {
     fetchData()
@@ -122,6 +125,23 @@ export default function LotsPage() {
       }
       return next
     })
+  }
+
+  async function saveLotNumber(lot: ReviewNeededLot, newValue: string) {
+    const trimmed = newValue.trim()
+    if (!trimmed || trimmed === lot.lotNumber) { setEditingLot(null); return }
+    setSavingLot(true)
+    const { error } = await supabase
+      .from('inventory')
+      .update({ lot_number: trimmed })
+      .in('id', lot.inventoryIds)
+    setSavingLot(false)
+    if (!error) {
+      setEditingLot(null)
+      fetchData()
+    } else {
+      console.error('로트번호 수정 실패:', error)
+    }
   }
 
   async function fetchData() {
@@ -276,12 +296,14 @@ export default function LotsPage() {
           productCode: item.products?.product_code || '',
           lotNumber: lotNum,
           totalQuantity: 0,
-          warehouses: []
+          warehouses: [],
+          inventoryIds: []
         })
       }
       const r = reviewMap.get(key)!
       r.totalQuantity += item.quantity
       r.warehouses.push({ name: item.warehouses?.name || '-', quantity: item.quantity })
+      r.inventoryIds.push(item.id)
     })
     setReviewNeededLots(Array.from(reviewMap.values()))
 
@@ -420,28 +442,75 @@ export default function LotsPage() {
         {/* 유통기한 확인 필요 섹션 */}
         {reviewNeededLots.length > 0 && (
           <div className="bg-orange-50 border border-orange-300 rounded-lg p-4 mb-4">
-            <h2 className="text-sm font-semibold text-orange-800 mb-2">
+            <h2 className="text-sm font-semibold text-orange-800 mb-1">
               ⚠️ 유통기한 확인 필요 ({reviewNeededLots.length}건)
             </h2>
-            <p className="text-xs text-orange-600 mb-3">유통기한 관리 대상이지만 로트번호가 YYMMDD 형식이 아니어서 자동 계산 불가 — 직접 확인 후 처리해 주세요.</p>
+            <p className="text-xs text-orange-600 mb-3">
+              유통기한 관리 대상이지만 로트번호가 YYMMDD 형식이 아니어서 자동 계산 불가 — 로트번호를 올바른 형식으로 수정하거나 직접 확인하세요.
+            </p>
             <div className="space-y-2">
-              {reviewNeededLots.map((r, i) => (
-                <div key={i} className="bg-white border border-orange-200 rounded px-3 py-2 flex items-center justify-between flex-wrap gap-2">
-                  <div>
-                    <span className="font-medium text-sm text-gray-800">{r.productName}</span>
-                    <span className="text-xs text-gray-400 ml-2">{r.productCode}</span>
-                    <span className="ml-2 font-mono text-xs bg-orange-100 text-orange-700 px-1.5 py-0.5 rounded">{r.lotNumber}</span>
+              {reviewNeededLots.map((r, i) => {
+                const editKey = `${r.productCode}_${r.lotNumber}`
+                const isEditing = editingLot?.key === editKey
+                return (
+                  <div key={i} className="bg-white border border-orange-200 rounded px-3 py-2.5">
+                    <div className="flex items-center justify-between flex-wrap gap-2">
+                      {/* 왼쪽: 제품명 + 로트번호 (보기/수정) */}
+                      <div className="flex items-center gap-2 flex-wrap min-w-0">
+                        <span className="font-medium text-sm text-gray-800">{r.productName}</span>
+                        <span className="text-xs text-gray-400">{r.productCode}</span>
+                        {isEditing ? (
+                          <div className="flex items-center gap-1">
+                            <input
+                              autoFocus
+                              value={editingLot!.value}
+                              onChange={e => setEditingLot({ key: editKey, value: e.target.value })}
+                              onKeyDown={e => {
+                                if (e.key === 'Enter') saveLotNumber(r, editingLot!.value)
+                                if (e.key === 'Escape') setEditingLot(null)
+                              }}
+                              placeholder="YYMMDD-NN"
+                              className="font-mono text-xs border border-orange-300 rounded px-2 py-0.5 w-28 focus:outline-none focus:ring-2 focus:ring-orange-400"
+                            />
+                            <button
+                              onClick={() => saveLotNumber(r, editingLot!.value)}
+                              disabled={savingLot}
+                              className="text-xs px-2 py-0.5 bg-orange-500 text-white rounded hover:bg-orange-600 transition disabled:opacity-50"
+                            >
+                              {savingLot ? '...' : '저장'}
+                            </button>
+                            <button
+                              onClick={() => setEditingLot(null)}
+                              className="text-xs px-2 py-0.5 bg-gray-100 text-gray-600 rounded hover:bg-gray-200 transition"
+                            >
+                              취소
+                            </button>
+                          </div>
+                        ) : (
+                          <span className="font-mono text-xs bg-orange-100 text-orange-700 px-1.5 py-0.5 rounded">{r.lotNumber}</span>
+                        )}
+                      </div>
+                      {/* 오른쪽: 창고별 수량 + 수정 버튼 */}
+                      <div className="flex items-center gap-1.5 flex-wrap shrink-0">
+                        {r.warehouses.map((w, j) => (
+                          <span key={j} className="text-xs text-gray-500 bg-gray-100 px-2 py-0.5 rounded">
+                            {w.name} {w.quantity.toLocaleString()}개
+                          </span>
+                        ))}
+                        <span className="text-xs font-bold text-gray-700">총 {r.totalQuantity.toLocaleString()}개</span>
+                        {!isEditing && (
+                          <button
+                            onClick={() => setEditingLot({ key: editKey, value: r.lotNumber })}
+                            className="text-xs px-2.5 py-1 bg-orange-100 text-orange-700 hover:bg-orange-200 rounded transition font-medium"
+                          >
+                            수정
+                          </button>
+                        )}
+                      </div>
+                    </div>
                   </div>
-                  <div className="flex items-center gap-1.5 flex-wrap">
-                    {r.warehouses.map((w, j) => (
-                      <span key={j} className="text-xs text-gray-500 bg-gray-100 px-2 py-0.5 rounded">
-                        {w.name} {w.quantity.toLocaleString()}개
-                      </span>
-                    ))}
-                    <span className="text-xs font-bold text-gray-700">총 {r.totalQuantity.toLocaleString()}개</span>
-                  </div>
-                </div>
-              ))}
+                )
+              })}
             </div>
           </div>
         )}
