@@ -98,7 +98,19 @@ export default function ChatWidget() {
     warehouseChoices?: Warehouse[]
     confirmedProduct?: Product
   }
+  interface PendingPlanAction {
+    planName: string
+    setQty: number
+    channel: string | null
+    transactionDate: string
+    bomLotsMap: {
+      bom: { product_id: string; product_name: string; qty_per_set: number; unit_cost: number }
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      normalLots: any[]
+    }[]
+  }
   const [pendingPartial, setPendingPartial] = useState<PendingPartial | null>(null)
+  const [pendingPlanAction, setPendingPlanAction] = useState<PendingPlanAction | null>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
   const formRef = useRef<HTMLFormElement>(null)
@@ -226,16 +238,32 @@ export default function ChatWidget() {
     setTodayTransactions(txData || [])
   }
 
-  // 제품+창고 확정 후 바로 실행
+  // 제품+창고 확정 후 확인 단계 진입
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  async function proceedToConfirm(actionData: any, product: Product, warehouse: Warehouse) {
+  function proceedToConfirm(actionData: any, product: Product, warehouse: Warehouse) {
     const confirmed = {
       ...actionData,
       product_name: product.product_name,
       warehouse: warehouse.name
     }
-    // 확인 없이 바로 실행
-    await confirmActionWith(confirmed)
+
+    const lot = confirmed.lot_number || (() => {
+      const t = new Date()
+      return `${t.getFullYear().toString().slice(-2)}${String(t.getMonth()+1).padStart(2,'0')}${String(t.getDate()).padStart(2,'0')}-01`
+    })()
+
+    let summary = ''
+    if (confirmed.action === '입고') {
+      summary = `${confirmed.product_name} ${(confirmed.quantity||0).toLocaleString()}개를 ${confirmed.warehouse}로 입고합니다.\n로트: ${lot}`
+    } else if (confirmed.action === '출고') {
+      const dest = confirmed.channel ? ` → ${confirmed.channel}` : ''
+      summary = `${confirmed.product_name} ${(confirmed.quantity||0).toLocaleString()}개를 ${confirmed.warehouse}에서 출고합니다${dest}.`
+    } else if (confirmed.action === '창고이동') {
+      summary = `${confirmed.product_name} ${(confirmed.quantity||0).toLocaleString()}개를 ${confirmed.warehouse} → ${confirmed.to_warehouse}로 이동합니다.`
+    }
+
+    setPendingAction(confirmed)
+    setMessages(prev => [...prev, { role: 'assistant', content: summary }])
   }
 
   // 창고 선택 로직
@@ -512,7 +540,18 @@ export default function ChatWidget() {
       return
     }
 
-    // 3. 전체 재고 확인 통과 → 실제 차감
+    // 3. 재고 확인 통과 → 확인 단계 진입
+    const summary = `📦 ${plan_name} × ${setQty}세트 기획 출고를 진행합니다.\n\n구성품:\n` +
+      bomLotsMap.map(({ bom }) => `- ${bom.product_name} ${(bom.qty_per_set * setQty).toLocaleString()}개`).join('\n')
+
+    setPendingPlanAction({ planName: plan_name, setQty, channel: channel || null, transactionDate, bomLotsMap })
+    setMessages(prev => [...prev, { role: 'assistant', content: summary }])
+  }
+
+  async function executePlanOutboundConfirmed(pending: PendingPlanAction) {
+    const { planName, setQty, channel, transactionDate, bomLotsMap } = pending
+    const deductionLog: string[] = []
+
     for (const { bom, normalLots } of bomLotsMap) {
       const totalQty = bom.qty_per_set * setQty
       let remaining = totalQty
@@ -541,7 +580,7 @@ export default function ChatWidget() {
         type: '출고',
         quantity: totalQty,
         channel: channel || null,
-        note: `[기획출고] ${plan_name} ${setQty}세트`,
+        note: `[기획출고] ${planName} ${setQty}세트`,
         recorded_by: profile?.name || 'AI',
         created_at: transactionDate,
         company_id: profile?.company_id
@@ -551,14 +590,13 @@ export default function ChatWidget() {
       deductionLog.push(`${bom.product_name} ${totalQty}개 (${bom.qty_per_set}×${setQty}, 원가 ${avgCost.toLocaleString()}원/개)`)
     }
 
-    // 4. 결과 메시지
-    const msg = `기획 출고 완료!\n📦 ${plan_name} × ${setQty}세트\n\n차감 내역:\n` + deductionLog.map(d => `- ${d}`).join('\n')
-
+    const msg = `기획 출고 완료!\n📦 ${planName} × ${setQty}세트\n\n차감 내역:\n` + deductionLog.map(d => `- ${d}`).join('\n')
     setMessages(prev => {
       const next: Message[] = [...prev, { role: 'assistant', content: msg }]
       try { sessionStorage.setItem(CHAT_MESSAGES_STORAGE_KEY, JSON.stringify(next)) } catch { /* */ }
       return next
     })
+    setPendingPlanAction(null)
     window.location.reload()
   }
 
@@ -934,9 +972,20 @@ export default function ChatWidget() {
     }
   }
 
+  async function handleConfirm() {
+    if (pendingPlanAction) {
+      setLoading(true)
+      await executePlanOutboundConfirmed(pendingPlanAction)
+      setLoading(false)
+    } else if (pendingAction) {
+      await confirmActionWith(pendingAction)
+    }
+  }
+
   function cancelAction() {
     setPendingAction(null)
     setPendingPartial(null)
+    setPendingPlanAction(null)
     setMessages(prev => [...prev, { role: 'assistant', content: '취소되었습니다.' }])
     setTimeout(() => inputRef.current?.focus(), 100)
   }
@@ -992,27 +1041,50 @@ export default function ChatWidget() {
               </div>
             )}
 
+            {/* 재고 변경 확인 버튼 */}
+            {(pendingAction || pendingPlanAction) && !loading && (
+              <div className="flex gap-2 pt-1">
+                <button
+                  onClick={handleConfirm}
+                  className="flex-1 bg-blue-600 text-white py-2 rounded-lg text-sm font-semibold hover:bg-blue-700 transition"
+                >
+                  확인
+                </button>
+                <button
+                  onClick={cancelAction}
+                  className="flex-1 bg-gray-100 text-gray-600 py-2 rounded-lg text-sm font-semibold hover:bg-gray-200 transition"
+                >
+                  취소
+                </button>
+              </div>
+            )}
+
             <div ref={messagesEndRef} />
           </div>
 
           {/* 입력 영역 */}
-          <form ref={formRef} onSubmit={handleSubmit} className="p-3 border-t flex gap-2 shrink-0">
-            <input
-              ref={inputRef}
-              type="text"
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              placeholder="입고/출고/이동 요청 입력..."
-              className="flex-1 border rounded-lg px-3 py-2 text-base focus:outline-none focus:ring-2 focus:ring-blue-500"
-              disabled={loading}
-            />
-            <button
-              type="submit"
-              disabled={loading || !input.trim()}
-              className="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50"
-            >
-              전송
-            </button>
+          <form ref={formRef} onSubmit={handleSubmit} className="p-3 border-t flex flex-col gap-1.5 shrink-0">
+            {(pendingAction || pendingPlanAction) && (
+              <p className="text-xs text-center text-orange-500">위에서 확인 또는 취소를 눌러주세요</p>
+            )}
+            <div className="flex gap-2">
+              <input
+                ref={inputRef}
+                type="text"
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                placeholder="입고/출고/이동 요청 입력..."
+                className="flex-1 border rounded-lg px-3 py-2 text-base focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-50 disabled:text-gray-400"
+                disabled={loading || !!(pendingAction || pendingPlanAction)}
+              />
+              <button
+                type="submit"
+                disabled={loading || !input.trim() || !!(pendingAction || pendingPlanAction)}
+                className="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50"
+              >
+                전송
+              </button>
+            </div>
           </form>
         </div>
       )}
