@@ -10,6 +10,7 @@ import {
   getTransferReconciliation,
   getInboundEvidenceExceptions,
   getOutboundEvidenceExceptions,
+  isOverdue,
   ReconciliationProgressRow,
   UnmatchedRow,
   EvidenceExceptionRow,
@@ -39,6 +40,8 @@ export default function ExceptionsPage() {
   const [unmatched, setUnmatched] = useState<LabeledUnmatched[]>([])
   const [evidenceExceptions, setEvidenceExceptions] = useState<LabeledEvidence[]>([])
   const [nonTransport, setNonTransport] = useState<NonTransportRow[]>([])
+  const [pendingMissing, setPendingMissing] = useState<LabeledMissing[]>([])
+  const [graceDays, setGraceDays] = useState(3)
   const [loading, setLoading] = useState(true)
 
   const [attachingId, setAttachingId] = useState<string | null>(null)
@@ -55,19 +58,24 @@ export default function ExceptionsPage() {
 
   async function load(companyId: string) {
     setLoading(true)
-    const [inbound, outbound, transfer, inboundEvidence, outboundEvidence] = await Promise.all([
+    const [{ data: companyData }, inbound, outbound, transfer, inboundEvidence, outboundEvidence] = await Promise.all([
+      supabase.from('companies').select('reconciliation_grace_days').eq('id', companyId).single(),
       getInboundReconciliation(companyId),
       getOutboundReconciliation(companyId),
       getTransferReconciliation(companyId),
       getInboundEvidenceExceptions(companyId),
       getOutboundEvidenceExceptions(companyId)
     ])
+    const grace = companyData?.reconciliation_grace_days ?? 3
+    setGraceDays(grace)
 
-    setMissing([
+    const allMissing: LabeledMissing[] = [
       ...inbound.progress.filter(p => p.remaining_qty > 0).map(p => ({ ...p, source: '입고' as SourceLabel })),
       ...outbound.progress.filter(p => p.remaining_qty > 0).map(p => ({ ...p, source: '출고' as SourceLabel })),
       ...transfer.progress.filter(p => p.remaining_qty > 0).map(p => ({ ...p, source: '이동' as SourceLabel }))
-    ])
+    ]
+    setMissing(allMissing.filter(m => isOverdue(m.expected_date, grace)))
+    setPendingMissing(allMissing.filter(m => !isOverdue(m.expected_date, grace)))
 
     setUnmatched([
       ...inbound.unmatched.map(u => ({ ...u, source: '입고' as SourceLabel })),
@@ -180,9 +188,11 @@ export default function ExceptionsPage() {
           <div className="bg-white rounded-lg shadow">
             <div className="p-3 md:p-6 border-b">
               <h2 className="text-base md:text-lg font-semibold text-orange-600">
-                ⚠ 증빙 있음 · 기록 없음/미달 ({missing.length}건)
+                🚨 기한 초과 미기록/미달 ({missing.length}건)
               </h2>
-              <p className="text-xs text-gray-400 mt-1">승인된 품의서/지시서 대비 실물 처리가 안 됐거나 부족한 건</p>
+              <p className="text-xs text-gray-400 mt-1">
+                납기·출고예정일 + 유예({graceDays}일)을 넘겼는데도 실물 처리가 안 됐거나 부족한 건
+              </p>
             </div>
             <div className="p-3 md:p-6">
               {missing.length === 0 ? (
@@ -195,6 +205,11 @@ export default function ExceptionsPage() {
                         <span className="px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-800 mr-2">{m.source}</span>
                         <span className="font-medium text-sm">{m.product_name}</span>
                         <span className="text-xs text-gray-500 ml-2">{m.display_location}</span>
+                        {m.escalated_at ? (
+                          <span className="text-xs bg-red-100 text-red-700 px-1.5 py-0.5 rounded ml-2">에스컬레이션됨</span>
+                        ) : m.stage1_alert_sent_at ? (
+                          <span className="text-xs bg-orange-100 text-orange-700 px-1.5 py-0.5 rounded ml-2">1차 알림중</span>
+                        ) : null}
                       </div>
                       <div className="text-right text-sm">
                         <span className="text-orange-600 font-semibold">미달 {m.remaining_qty.toLocaleString()}</span>
@@ -203,6 +218,11 @@ export default function ExceptionsPage() {
                     </div>
                   ))}
                 </div>
+              )}
+              {pendingMissing.length > 0 && (
+                <p className="text-xs text-gray-400 mt-4">
+                  진행중(예정일 내) {pendingMissing.length}건 — 아직 기한 전이라 예외 아님
+                </p>
               )}
             </div>
           </div>

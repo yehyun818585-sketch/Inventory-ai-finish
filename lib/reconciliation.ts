@@ -6,6 +6,15 @@ import { supabase as defaultClient } from '@/lib/supabase'
 // 소진시켜, 미달분(progress)과 증빙 없는 초과분(unmatched)을 분리해서 반환한다.
 // 기준 키: 입고=제품+창고, 출고=제품+채널, 이동=제품+출발창고+도착창고.
 
+// 예정일(expected_date) + 유예(grace_days)를 넘겼는지 판단하는 공용 헬퍼.
+// expected_date가 없는 문서(마이그레이션 이전 데이터 등)는 판단 불가하므로 true(기존처럼 항상 노출)로 하위호환 처리.
+export function isOverdue(expectedDate: string | null, graceDays: number): boolean {
+  if (!expectedDate) return true
+  const due = new Date(expectedDate)
+  due.setDate(due.getDate() + graceDays)
+  return new Date() > due
+}
+
 export interface ReconciliationProgressRow {
   document_id: string
   product_id: string
@@ -17,6 +26,9 @@ export interface ReconciliationProgressRow {
   remaining_qty: number
   approved_by: string | null
   approved_at: string | null
+  expected_date: string | null
+  stage1_alert_sent_at: string | null
+  escalated_at: string | null
 }
 
 export interface UnmatchedRow {
@@ -46,6 +58,7 @@ async function reconcile(
     .from('approval_documents')
     .select(`
       id, warehouse_id, to_warehouse_id, channel, approved_by, approved_at, created_at,
+      expected_date, stage1_alert_sent_at, escalated_at,
       warehouses:warehouse_id ( name ),
       to_warehouse:to_warehouse_id ( name ),
       approval_document_items ( product_id, quantity, products ( product_name, product_code ) )
@@ -100,7 +113,10 @@ async function reconcile(
         actual_qty: claim,
         remaining_qty: item.quantity - claim,
         approved_by: doc.approved_by,
-        approved_at: doc.approved_at
+        approved_at: doc.approved_at,
+        expected_date: doc.expected_date ?? null,
+        stage1_alert_sent_at: doc.stage1_alert_sent_at ?? null,
+        escalated_at: doc.escalated_at ?? null
       })
     })
   })

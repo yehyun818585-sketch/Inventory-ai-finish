@@ -43,6 +43,7 @@ interface ApprovalDocument {
   to_warehouse_id: string | null
   channel: string | null
   memo: string | null
+  expected_date: string | null
   requested_by: string | null
   requested_by_user_id: string | null
   approved_by: string | null
@@ -77,7 +78,8 @@ export default function ApprovalsPage() {
     warehouse_id: '',
     to_warehouse_id: '',
     channel: '',
-    memo: ''
+    memo: '',
+    expected_date: ''
   })
   const [items, setItems] = useState<ItemRow[]>([{ product_id: '', quantity: 0 }])
   const [saving, setSaving] = useState(false)
@@ -134,7 +136,7 @@ export default function ApprovalsPage() {
     const { data: documentsData } = await supabase
       .from('approval_documents')
       .select(`
-        id, doc_type, status, warehouse_id, to_warehouse_id, channel, memo,
+        id, doc_type, status, warehouse_id, to_warehouse_id, channel, memo, expected_date,
         requested_by, requested_by_user_id, approved_by, approved_at, created_at,
         warehouses:warehouse_id (name),
         to_warehouse:to_warehouse_id (name),
@@ -166,7 +168,7 @@ export default function ApprovalsPage() {
   }
 
   function resetForm() {
-    setFormData({ doc_type: '발주품의서', warehouse_id: '', to_warehouse_id: '', channel: '', memo: '' })
+    setFormData({ doc_type: '발주품의서', warehouse_id: '', to_warehouse_id: '', channel: '', memo: '', expected_date: '' })
     setItems([{ product_id: '', quantity: 0 }])
     setShowForm(false)
   }
@@ -187,6 +189,10 @@ export default function ApprovalsPage() {
       alert('도착 창고를 선택해주세요.')
       return
     }
+    if ((formData.doc_type === '발주품의서' || formData.doc_type === '출고지시서') && !formData.expected_date) {
+      alert(formData.doc_type === '발주품의서' ? '납기예정일을 입력해주세요.' : '출고예정일을 입력해주세요.')
+      return
+    }
 
     setSaving(true)
     try {
@@ -200,6 +206,7 @@ export default function ApprovalsPage() {
           to_warehouse_id: formData.doc_type === '이동품의서' ? formData.to_warehouse_id : null,
           channel: formData.doc_type === '출고지시서' ? (formData.channel || null) : null,
           memo: formData.memo || null,
+          expected_date: formData.doc_type !== '이동품의서' ? formData.expected_date : null,
           requested_by: profile?.name || null,
           requested_by_user_id: profile?.id || null
         }])
@@ -389,6 +396,22 @@ export default function ApprovalsPage() {
                         onChange={(e) => setFormData({ ...formData, channel: e.target.value })}
                         className="w-full border rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
                       />
+                    </div>
+                  )}
+
+                  {(formData.doc_type === '발주품의서' || formData.doc_type === '출고지시서') && (
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        {formData.doc_type === '발주품의서' ? '납기예정일 *' : '출고예정일 *'}
+                      </label>
+                      <input
+                        type="date"
+                        required
+                        value={formData.expected_date}
+                        onChange={(e) => setFormData({ ...formData, expected_date: e.target.value })}
+                        className="w-full border rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      />
+                      <p className="text-xs text-gray-400 mt-1">이 날짜 + 유예기간이 지나도 실물기록이 없으면 미기록으로 적발됩니다</p>
                     </div>
                   )}
                 </div>

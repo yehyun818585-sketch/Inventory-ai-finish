@@ -11,6 +11,7 @@ interface CompanySettings {
   default_shelf_life_months: number
   shelf_life_warning_ratio: number
   inventory_unit: string
+  reconciliation_grace_days: number
 }
 
 const INDUSTRY_PRESETS: Record<string, { default_shelf_life_months: number; inventory_unit: string }> = {
@@ -26,7 +27,8 @@ export default function SettingsPage() {
     industry: '기타',
     default_shelf_life_months: 24,
     shelf_life_warning_ratio: 0.25,
-    inventory_unit: '개'
+    inventory_unit: '개',
+    reconciliation_grace_days: 3
   })
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
@@ -39,7 +41,7 @@ export default function SettingsPage() {
   async function fetchSettings() {
     const { data } = await supabase
       .from('companies')
-      .select('name, industry, default_shelf_life_months, shelf_life_warning_ratio, inventory_unit')
+      .select('name, industry, default_shelf_life_months, shelf_life_warning_ratio, inventory_unit, reconciliation_grace_days')
       .eq('id', profile!.company_id!)
       .single()
 
@@ -49,7 +51,8 @@ export default function SettingsPage() {
         industry: data.industry || '기타',
         default_shelf_life_months: data.default_shelf_life_months || 24,
         shelf_life_warning_ratio: data.shelf_life_warning_ratio || 0.25,
-        inventory_unit: data.inventory_unit || '개'
+        inventory_unit: data.inventory_unit || '개',
+        reconciliation_grace_days: data.reconciliation_grace_days ?? 3
       })
     }
     setLoading(false)
@@ -78,7 +81,8 @@ export default function SettingsPage() {
         industry: settings.industry,
         default_shelf_life_months: settings.default_shelf_life_months,
         shelf_life_warning_ratio: settings.shelf_life_warning_ratio,
-        inventory_unit: settings.inventory_unit
+        inventory_unit: settings.inventory_unit,
+        reconciliation_grace_days: settings.reconciliation_grace_days
       })
       .eq('id', profile.company_id)
       .select()
@@ -223,6 +227,27 @@ export default function SettingsPage() {
                 />
               )}
             </div>
+          </div>
+
+          <hr />
+
+          {/* 미기록 유예일수(α) */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              미기록 유예일수 (α)
+            </label>
+            <p className="text-xs text-gray-400 mb-2">
+              발주품의서/출고지시서의 납기·출고예정일로부터 며칠 지나야 미기록으로 적발할지 설정합니다
+            </p>
+            <input
+              type="number"
+              min="0"
+              max="30"
+              value={settings.reconciliation_grace_days}
+              onChange={(e) => setSettings(prev => ({ ...prev, reconciliation_grace_days: Number(e.target.value) }))}
+              className="w-32 border rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
+            <span className="ml-2 text-gray-500 text-sm">일</span>
           </div>
 
           {/* 저장 버튼 */}
