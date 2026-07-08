@@ -71,7 +71,7 @@ export async function POST(request: Request) {
         </p>
         <p style="font-size:14.5px;line-height:1.8;margin:0 0 28px;">
           아래와 같이 발주서를 송부드리오니 확인 부탁드립니다.<br/>
-          확인 후 <b>발주확인서 회신</b> 부탁드리며, 문의사항 있으시면 언제든 연락 주세요.
+          확인 후 <b>본 메일에 회신</b>하여 발주확인서를 보내주시면 자동으로 접수됩니다. 문의사항 있으시면 언제든 연락 주세요.
         </p>
 
         <div style="background:#1e3a8a;padding:24px 32px;border-radius:12px 12px 0 0;display:flex;justify-content:space-between;align-items:center;">
@@ -123,6 +123,7 @@ export async function POST(request: Request) {
     const { error: emailError } = await resend.emails.send({
       from: 'onboarding@resend.dev',
       to: recipient_email,
+      replyTo: 'po-confirm@attude.uk',
       subject: `[발주서] ${doc.supplier_name || ''} ${doc.order_number || ''}`,
       html
     })
