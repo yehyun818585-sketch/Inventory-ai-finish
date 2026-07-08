@@ -327,60 +327,6 @@ export default function ApprovalsPage() {
     }
   }
 
-  function currentPendingStep(doc: ApprovalDocument): ApprovalStep | undefined {
-    return [...doc.approval_steps].sort((a, b) => a.step_order - b.step_order).find(s => s.status === '대기')
-  }
-
-  async function handleApprove(doc: ApprovalDocument) {
-    const step = currentPendingStep(doc)
-    if (!step) return
-    if (!confirm(`${doc.doc_type} 승인하시겠습니까?`)) return
-
-    const now = new Date().toISOString()
-    await supabase.from('approval_steps').update({
-      status: '승인',
-      acted_by_user_id: profile?.id || null,
-      acted_by_name: profile?.name || null,
-      acted_at: now
-    }).eq('id', step.id)
-
-    // 결재선의 모든 단계가 승인됐는지 확인 (지금은 항상 1단계라 즉시 전체 승인)
-    const otherSteps = doc.approval_steps.filter(s => s.id !== step.id)
-    const allApproved = otherSteps.every(s => s.status === '승인')
-    if (allApproved) {
-      await supabase.from('approval_documents').update({
-        status: '승인',
-        approved_by: profile?.name || null,
-        approved_at: now
-      }).eq('id', doc.id)
-    }
-    fetchData()
-  }
-
-  async function handleReject(doc: ApprovalDocument) {
-    const step = currentPendingStep(doc)
-    if (!step) return
-    const reason = prompt('반려 사유를 입력해주세요.')
-    if (reason === null) return
-
-    const now = new Date().toISOString()
-    await supabase.from('approval_steps').update({
-      status: '반려',
-      acted_by_user_id: profile?.id || null,
-      acted_by_name: profile?.name || null,
-      acted_at: now
-    }).eq('id', step.id)
-
-    // 한 단계라도 반려되면 결재선이 몇 단계든 문서 전체를 즉시 반려 처리
-    await supabase.from('approval_documents').update({
-      status: '반려',
-      approved_by: profile?.name || null,
-      approved_at: now,
-      memo: doc.memo ? `${doc.memo}\n[반려사유] ${reason}` : `[반려사유] ${reason}`
-    }).eq('id', doc.id)
-    fetchData()
-  }
-
   const isApprover = profile?.position === '관리책임자' || profile?.position === '대표'
   const filteredDocs = documents.filter(d => d.doc_type === docTypeTab && d.status === statusTab)
 
@@ -675,33 +621,14 @@ export default function ApprovalsPage() {
                             )
                           })()}
                         </div>
-                        {(() => {
-                          if (!isApprover || doc.status !== '대기') return null
-                          const isSelfDrafted = !!doc.requested_by_user_id && doc.requested_by_user_id === profile?.id
-                          return (
-                            <div className="flex flex-col items-end gap-1 shrink-0">
-                              <div className="flex gap-2">
-                                <button
-                                  onClick={() => handleApprove(doc)}
-                                  disabled={isSelfDrafted}
-                                  className="bg-green-600 text-white px-3 py-1.5 text-sm rounded-lg hover:bg-green-700 disabled:opacity-40 disabled:cursor-not-allowed transition"
-                                >
-                                  승인
-                                </button>
-                                <button
-                                  onClick={() => handleReject(doc)}
-                                  disabled={isSelfDrafted}
-                                  className="bg-red-500 text-white px-3 py-1.5 text-sm rounded-lg hover:bg-red-600 disabled:opacity-40 disabled:cursor-not-allowed transition"
-                                >
-                                  반려
-                                </button>
-                              </div>
-                              {isSelfDrafted && (
-                                <p className="text-xs text-gray-400">본인이 기안한 건은 승인할 수 없습니다</p>
-                              )}
-                            </div>
-                          )
-                        })()}
+                        {isApprover && doc.status === '대기' && (
+                          <Link
+                            href={`/approvals/${doc.id}`}
+                            className="text-xs bg-orange-100 text-orange-700 px-2.5 py-1.5 rounded-lg hover:bg-orange-200 transition shrink-0"
+                          >
+                            검토 후 승인 →
+                          </Link>
+                        )}
                       </div>
                     </div>
                   ))}
