@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
+import * as XLSX from 'xlsx'
 import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/app/contexts/AuthContext'
 import Navbar from '@/app/components/Navbar'
@@ -103,6 +104,12 @@ export default function ApprovalsPage() {
   const [saving, setSaving] = useState(false)
   const [progressMap, setProgressMap] = useState<Record<string, ReconciliationProgressRow>>({})
 
+  // 출고지시서 전용: 채널 발주 근거서류 (자사몰=엑셀 자동집계, 그 외=수동입력+파일첨부)
+  const [channelMode, setChannelMode] = useState<'자사몰' | '그 외'>('그 외')
+  const [channelOrderFile, setChannelOrderFile] = useState<File | null>(null)
+  const [parsingFile, setParsingFile] = useState(false)
+  const [unmatchedNames, setUnmatchedNames] = useState<string[]>([])
+
   useEffect(() => {
     fetchData()
   }, [profile?.company_id]) // eslint-disable-line react-hooks/exhaustive-deps
@@ -196,6 +203,9 @@ export default function ApprovalsPage() {
   function resetForm() {
     setFormData({ doc_type: '발주품의서', warehouse_id: '', to_warehouse_id: '', channel: '', memo: '', expected_date: '', supplier_id: '' })
     setItems([{ product_id: '', quantity: 0, isNew: false, newProductName: '', unit_price: '' }])
+    setChannelMode('그 외')
+    setChannelOrderFile(null)
+    setUnmatchedNames([])
     setShowForm(false)
   }
 
@@ -246,6 +256,54 @@ export default function ApprovalsPage() {
     return `${prefix}-${String(maxSeq + 1).padStart(2, '0')}`
   }
 
+  // 자사몰 "신규주문 엑셀 다운로드" 파일을 파싱해 상품별 수량을 합산하고 품목을 자동으로 채움.
+  // 매칭 안 되는 상품명은 unmatchedNames로 모아서 안내(수동으로 품목 추가 필요).
+  async function parseChannelOrderExcel(file: File) {
+    setParsingFile(true)
+    try {
+      const buf = await file.arrayBuffer()
+      const wb = XLSX.read(buf, { type: 'array' })
+      const sheet = wb.Sheets[wb.SheetNames[0]]
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const rows: any[] = XLSX.utils.sheet_to_json(sheet, { defval: '' })
+
+      const aggregated: Record<string, number> = {}
+      const unmatched: string[] = []
+
+      rows.forEach(row => {
+        const orderNo = String(row['주문번호'] || row['상품주문번호'] || '').trim()
+        if (!orderNo) return // 합계 행 등은 주문번호가 없어서 자동 스킵됨
+
+        const name = String(row['상품명'] || '').trim()
+        const option = String(row['옵션정보'] || '').trim()
+        const qty = Number(row['수량'] || 0)
+        if (!name || qty <= 0) return
+
+        const combined = `${name} ${option}`.toUpperCase()
+        const matched = products.find(p =>
+          combined.includes(p.product_code.toUpperCase()) || p.product_name === name
+        )
+
+        if (matched) {
+          aggregated[matched.id] = (aggregated[matched.id] || 0) + qty
+        } else if (!unmatched.includes(name)) {
+          unmatched.push(name)
+        }
+      })
+
+      const newItems: ItemRow[] = Object.entries(aggregated).map(([product_id, quantity]) => ({
+        product_id, quantity, isNew: false, newProductName: '', unit_price: ''
+      }))
+
+      if (newItems.length > 0) setItems(newItems)
+      setUnmatchedNames(unmatched)
+    } catch {
+      alert('엑셀 파싱에 실패했습니다. 파일 형식을 확인해주세요.')
+    } finally {
+      setParsingFile(false)
+    }
+  }
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
 
@@ -271,11 +329,27 @@ export default function ApprovalsPage() {
       alert('거래처를 선택해주세요.')
       return
     }
+    if (formData.doc_type === '출고지시서' && !channelOrderFile) {
+      alert('채널 발주 근거서류(엑셀/PDF)를 첨부해주세요.')
+      return
+    }
 
     setSaving(true)
     try {
       const cid = profile?.company_id || ''
       const orderNumber = formData.doc_type === '발주품의서' ? await generateOrderNumber(cid) : null
+
+      let channelOrderFileUrl: string | null = null
+      if (formData.doc_type === '출고지시서' && channelOrderFile) {
+        const ext = channelOrderFile.name.split('.').pop() || 'bin'
+        const path = `${cid}/channel-order/${Date.now()}.${ext}`
+        const { error: uploadError } = await supabase.storage.from('evidence').upload(path, channelOrderFile)
+        if (uploadError) {
+          alert('채널 발주 근거서류 업로드 실패: ' + uploadError.message)
+          return
+        }
+        channelOrderFileUrl = path
+      }
 
       const { data: doc, error: docError } = await supabase
         .from('approval_documents')
@@ -286,6 +360,7 @@ export default function ApprovalsPage() {
           warehouse_id: formData.warehouse_id,
           to_warehouse_id: formData.doc_type === '이동품의서' ? formData.to_warehouse_id : null,
           channel: formData.doc_type === '출고지시서' ? (formData.channel || null) : null,
+          channel_order_file_url: channelOrderFileUrl,
           memo: formData.memo || null,
           expected_date: formData.doc_type !== '이동품의서' ? formData.expected_date : null,
           supplier_id: formData.doc_type === '발주품의서' ? selectedSupplier!.id : null,
@@ -404,7 +479,12 @@ export default function ApprovalsPage() {
                           type="radio"
                           value={dt}
                           checked={formData.doc_type === dt}
-                          onChange={() => setFormData({ ...formData, doc_type: dt, to_warehouse_id: '', channel: '' })}
+                          onChange={() => {
+                            setFormData({ ...formData, doc_type: dt, to_warehouse_id: '', channel: '' })
+                            setChannelOrderFile(null)
+                            setUnmatchedNames([])
+                            setChannelMode('그 외')
+                          }}
                           className="mr-2"
                         />
                         <span className="font-medium">{dt}</span>
@@ -476,7 +556,7 @@ export default function ApprovalsPage() {
                       <label className="block text-sm font-medium text-gray-700 mb-1">채널</label>
                       <input
                         type="text"
-                        placeholder="예: 올리브영, 쿠팡"
+                        placeholder="예: 올리브영, 자사몰(카페24)"
                         value={formData.channel}
                         onChange={(e) => setFormData({ ...formData, channel: e.target.value })}
                         className="w-full border rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
@@ -500,6 +580,57 @@ export default function ApprovalsPage() {
                     </div>
                   )}
                 </div>
+
+                {formData.doc_type === '출고지시서' && (
+                  <div className="border rounded-lg p-4 bg-gray-50">
+                    <label className="block text-sm font-medium text-gray-700 mb-2">채널 발주 근거서류 *</label>
+                    <div className="flex gap-4 mb-3">
+                      <label className="flex items-center text-sm">
+                        <input
+                          type="radio"
+                          checked={channelMode === '자사몰'}
+                          onChange={() => { setChannelMode('자사몰'); setChannelOrderFile(null); setUnmatchedNames([]) }}
+                          className="mr-1.5"
+                        />
+                        자사몰 (엑셀 자동집계)
+                      </label>
+                      <label className="flex items-center text-sm">
+                        <input
+                          type="radio"
+                          checked={channelMode === '그 외'}
+                          onChange={() => { setChannelMode('그 외'); setChannelOrderFile(null); setUnmatchedNames([]) }}
+                          className="mr-1.5"
+                        />
+                        그 외(올리브영 등, 수동입력)
+                      </label>
+                    </div>
+
+                    <input
+                      type="file"
+                      accept={channelMode === '자사몰' ? '.xlsx,.xls' : '.xlsx,.xls,.pdf,image/*'}
+                      onChange={(e) => {
+                        const file = e.target.files?.[0] || null
+                        setChannelOrderFile(file)
+                        if (file && channelMode === '자사몰') parseChannelOrderExcel(file)
+                      }}
+                      className="text-sm"
+                    />
+                    {parsingFile && <p className="text-xs text-gray-500 mt-1">엑셀 분석 중...</p>}
+                    {channelMode === '자사몰' && channelOrderFile && !parsingFile && (
+                      <p className="text-xs text-green-600 mt-1">품목이 자동으로 합산되어 아래에 채워졌습니다. 내용을 확인해주세요.</p>
+                    )}
+                    {unmatchedNames.length > 0 && (
+                      <p className="text-xs text-orange-600 mt-1">
+                        자동 매칭 안 된 상품: {unmatchedNames.join(', ')} — 아래에서 수동으로 품목을 추가해주세요.
+                      </p>
+                    )}
+                    <p className="text-xs text-gray-400 mt-1">
+                      {channelMode === '자사몰'
+                        ? '카페24 등에서 다운로드한 "신규주문 엑셀"을 그대로 첨부하세요.'
+                        : '벤더 포털에서 받은 발주서(엑셀/PDF)를 첨부하고, 품목은 아래에 직접 입력하세요.'}
+                    </p>
+                  </div>
+                )}
 
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">품목 *</label>

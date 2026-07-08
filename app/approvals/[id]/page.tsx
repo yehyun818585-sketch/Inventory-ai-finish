@@ -36,6 +36,7 @@ interface DocumentDetail {
   expected_date: string | null
   confirmed_date: string | null
   confirmation_file_url: string | null
+  channel_order_file_url: string | null
   supplier_name: string | null
   supplier_id: string | null
   supplier_email: string | null
@@ -61,6 +62,7 @@ export default function ApprovalDetailPage() {
   const [loading, setLoading] = useState(true)
   const [showEvidence, setShowEvidence] = useState(false)
   const [signedUrl, setSignedUrl] = useState<string | null>(null)
+  const [channelFileSignedUrl, setChannelFileSignedUrl] = useState<string | null>(null)
 
   const [showConfirmForm, setShowConfirmForm] = useState(false)
   const [confirmedDate, setConfirmedDate] = useState('')
@@ -82,7 +84,7 @@ export default function ApprovalDetailPage() {
       .from('approval_documents')
       .select(`
         id, doc_type, status, warehouse_id, to_warehouse_id, channel, memo,
-        expected_date, confirmed_date, confirmation_file_url, supplier_name, supplier_id, supplier_email,
+        expected_date, confirmed_date, confirmation_file_url, channel_order_file_url, supplier_name, supplier_id, supplier_email,
         order_number, po_sent_at, po_sent_to,
         requested_by, requested_by_user_id, approved_by, approved_at, created_at,
         warehouses:warehouse_id (name),
@@ -109,6 +111,21 @@ export default function ApprovalDetailPage() {
       return
     }
     setSignedUrl(data.signedUrl)
+    window.open(data.signedUrl, '_blank')
+  }
+
+  async function viewChannelOrderFile() {
+    if (!doc?.channel_order_file_url) return
+    if (channelFileSignedUrl) {
+      window.open(channelFileSignedUrl, '_blank')
+      return
+    }
+    const { data, error } = await supabase.storage.from('evidence').createSignedUrl(doc.channel_order_file_url, 300)
+    if (error || !data) {
+      alert('파일 조회 실패: ' + error?.message)
+      return
+    }
+    setChannelFileSignedUrl(data.signedUrl)
     window.open(data.signedUrl, '_blank')
   }
 
@@ -424,8 +441,14 @@ export default function ApprovalDetailPage() {
                   증빙 {showEvidence ? '숨기기' : '보기'}
                 </button>
                 {showEvidence && (
-                  <div className="mt-2 text-sm">
-                    {doc.confirmation_file_url ? (
+                  <div className="mt-2 text-sm space-y-1">
+                    {doc.doc_type === '출고지시서' ? (
+                      doc.channel_order_file_url ? (
+                        <button onClick={viewChannelOrderFile} className="text-blue-600 hover:underline">채널 발주 근거서류 보기</button>
+                      ) : (
+                        <p className="text-gray-400">첨부된 채널 발주 근거서류가 없습니다.</p>
+                      )
+                    ) : doc.confirmation_file_url ? (
                       <button onClick={viewEvidence} className="text-blue-600 hover:underline">발주확인서 보기</button>
                     ) : (
                       <p className="text-gray-400">첨부된 발주확인서가 없습니다.</p>
