@@ -37,7 +37,10 @@ interface DocumentDetail {
   confirmed_date: string | null
   confirmation_file_url: string | null
   supplier_name: string | null
+  supplier_email: string | null
   order_number: string | null
+  po_sent_at: string | null
+  po_sent_to: string | null
   requested_by: string | null
   requested_by_user_id: string | null
   approved_by: string | null
@@ -63,6 +66,10 @@ export default function ApprovalDetailPage() {
   const [confirmFile, setConfirmFile] = useState<File | null>(null)
   const [confirming, setConfirming] = useState(false)
 
+  const [showSendForm, setShowSendForm] = useState(false)
+  const [sendEmail, setSendEmail] = useState('')
+  const [sending, setSending] = useState(false)
+
   useEffect(() => {
     if (!id) return
     load()
@@ -74,7 +81,8 @@ export default function ApprovalDetailPage() {
       .from('approval_documents')
       .select(`
         id, doc_type, status, warehouse_id, to_warehouse_id, channel, memo,
-        expected_date, confirmed_date, confirmation_file_url, supplier_name, order_number,
+        expected_date, confirmed_date, confirmation_file_url, supplier_name, supplier_email,
+        order_number, po_sent_at, po_sent_to,
         requested_by, requested_by_user_id, approved_by, approved_at, created_at,
         warehouses:warehouse_id (name),
         to_warehouse:to_warehouse_id (name),
@@ -133,13 +141,14 @@ export default function ApprovalDetailPage() {
       }).eq('id', doc.id)
 
       if (doc.requested_by_user_id) {
-        await supabase.from('notifications').insert([{
+        const { error: notifyError } = await supabase.from('notifications').insert([{
           company_id: profile?.company_id,
           recipient_user_id: doc.requested_by_user_id,
           document_id: doc.id,
           type: '승인',
           message: `${doc.doc_type} 승인되었습니다${doc.order_number ? ` (${doc.order_number})` : ''}`
         }])
+        if (notifyError) console.error('승인 알림 발송 실패:', notifyError)
       }
     }
     load()
@@ -169,13 +178,14 @@ export default function ApprovalDetailPage() {
     }).eq('id', doc.id)
 
     if (doc.requested_by_user_id) {
-      await supabase.from('notifications').insert([{
+      const { error: notifyError } = await supabase.from('notifications').insert([{
         company_id: profile?.company_id,
         recipient_user_id: doc.requested_by_user_id,
         document_id: doc.id,
         type: '반려',
         message: `${doc.doc_type} 반려되었습니다${doc.order_number ? ` (${doc.order_number})` : ''}: ${reason}`
       }])
+      if (notifyError) console.error('반려 알림 발송 실패:', notifyError)
     }
     load()
   }
@@ -211,6 +221,40 @@ export default function ApprovalDetailPage() {
       load()
     } finally {
       setConfirming(false)
+    }
+  }
+
+  async function openSendForm() {
+    if (doc?.supplier_email) {
+      setSendEmail(doc.supplier_email)
+    } else if (profile?.company_id) {
+      const { data } = await supabase.from('companies').select('default_po_email').eq('id', profile.company_id).single()
+      setSendEmail(data?.default_po_email || '')
+    }
+    setShowSendForm(true)
+  }
+
+  async function handleSendPO() {
+    if (!doc || !sendEmail.trim()) {
+      alert('수신 이메일을 입력해주세요.')
+      return
+    }
+    setSending(true)
+    try {
+      const res = await fetch('/api/send-purchase-order', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ document_id: doc.id, recipient_email: sendEmail.trim() })
+      })
+      const result = await res.json()
+      if (!result.sent) {
+        alert('발송 실패: ' + (result.reason || '알 수 없는 오류'))
+        return
+      }
+      setShowSendForm(false)
+      load()
+    } finally {
+      setSending(false)
     }
   }
 
@@ -427,6 +471,53 @@ export default function ApprovalDetailPage() {
                         </button>
                         <button
                           onClick={() => setShowConfirmForm(false)}
+                          className="text-sm text-gray-500 px-3 py-1.5"
+                        >
+                          취소
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* 발주서 발송 (승인된 발주품의서만) */}
+              {doc.doc_type === '발주품의서' && doc.status === '승인' && (
+                <div className="border-t pt-4">
+                  {doc.po_sent_at && (
+                    <p className="text-xs text-gray-400 mb-2">
+                      발송완료 ({new Date(doc.po_sent_at).toLocaleString('ko-KR')}, {doc.po_sent_to})
+                    </p>
+                  )}
+                  {!showSendForm ? (
+                    <button
+                      onClick={openSendForm}
+                      className="text-sm bg-blue-600 text-white px-3 py-1.5 rounded-lg hover:bg-blue-700 transition"
+                    >
+                      {doc.po_sent_at ? '발주서 재발송' : '발주서 발송'}
+                    </button>
+                  ) : (
+                    <div className="bg-gray-50 rounded-lg p-4 space-y-3">
+                      <div>
+                        <label className="block text-xs text-gray-500 mb-1">거래처 담당자 이메일 *</label>
+                        <input
+                          type="email"
+                          value={sendEmail}
+                          onChange={(e) => setSendEmail(e.target.value)}
+                          placeholder="order@supplier.com"
+                          className="border rounded-lg px-3 py-1.5 text-sm w-64"
+                        />
+                      </div>
+                      <div className="flex gap-2">
+                        <button
+                          onClick={handleSendPO}
+                          disabled={sending}
+                          className="bg-green-600 text-white px-3 py-1.5 text-sm rounded-lg hover:bg-green-700 disabled:opacity-50 transition"
+                        >
+                          {sending ? '발송 중...' : '발송'}
+                        </button>
+                        <button
+                          onClick={() => setShowSendForm(false)}
                           className="text-sm text-gray-500 px-3 py-1.5"
                         >
                           취소

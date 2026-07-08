@@ -321,21 +321,24 @@ export default function ApprovalsPage() {
       }
 
       // 승인자(관리책임자/대표, 본인 제외)에게 결재요청 알림
-      const { data: approvers } = await supabase
+      const { data: approvers, error: approversError } = await supabase
         .from('profiles')
         .select('id')
         .eq('company_id', cid)
         .in('position', ['관리책임자', '대표'])
         .neq('id', profile?.id || '')
 
-      if (approvers && approvers.length > 0) {
-        await supabase.from('notifications').insert(approvers.map(a => ({
+      if (approversError) {
+        console.error('승인자 조회 실패:', approversError)
+      } else if (approvers && approvers.length > 0) {
+        const { error: notifyError } = await supabase.from('notifications').insert(approvers.map(a => ({
           company_id: cid,
           recipient_user_id: a.id,
           document_id: doc.id,
           type: '결재요청',
           message: `${formData.doc_type} 승인 요청${orderNumber ? ` (${orderNumber})` : ''}`
         })))
+        if (notifyError) console.error('결재요청 알림 발송 실패:', notifyError)
       }
 
       resetForm()

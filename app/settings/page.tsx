@@ -12,6 +12,7 @@ interface CompanySettings {
   shelf_life_warning_ratio: number
   inventory_unit: string
   reconciliation_grace_days: number
+  default_po_email: string
 }
 
 const INDUSTRY_PRESETS: Record<string, { default_shelf_life_months: number; inventory_unit: string }> = {
@@ -28,7 +29,8 @@ export default function SettingsPage() {
     default_shelf_life_months: 24,
     shelf_life_warning_ratio: 0.25,
     inventory_unit: '개',
-    reconciliation_grace_days: 3
+    reconciliation_grace_days: 3,
+    default_po_email: ''
   })
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
@@ -41,7 +43,7 @@ export default function SettingsPage() {
   async function fetchSettings() {
     const { data } = await supabase
       .from('companies')
-      .select('name, industry, default_shelf_life_months, shelf_life_warning_ratio, inventory_unit, reconciliation_grace_days')
+      .select('name, industry, default_shelf_life_months, shelf_life_warning_ratio, inventory_unit, reconciliation_grace_days, default_po_email')
       .eq('id', profile!.company_id!)
       .single()
 
@@ -52,7 +54,8 @@ export default function SettingsPage() {
         default_shelf_life_months: data.default_shelf_life_months || 24,
         shelf_life_warning_ratio: data.shelf_life_warning_ratio || 0.25,
         inventory_unit: data.inventory_unit || '개',
-        reconciliation_grace_days: data.reconciliation_grace_days ?? 3
+        reconciliation_grace_days: data.reconciliation_grace_days ?? 3,
+        default_po_email: data.default_po_email || ''
       })
     }
     setLoading(false)
@@ -82,7 +85,8 @@ export default function SettingsPage() {
         default_shelf_life_months: settings.default_shelf_life_months,
         shelf_life_warning_ratio: settings.shelf_life_warning_ratio,
         inventory_unit: settings.inventory_unit,
-        reconciliation_grace_days: settings.reconciliation_grace_days
+        reconciliation_grace_days: settings.reconciliation_grace_days,
+        default_po_email: settings.default_po_email || null
       })
       .eq('id', profile.company_id)
       .select()
@@ -248,6 +252,23 @@ export default function SettingsPage() {
               className="w-32 border rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
             />
             <span className="ml-2 text-gray-500 text-sm">일</span>
+          </div>
+
+          {/* 발주서 기본 수신처 */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              발주서 기본 수신처 이메일
+            </label>
+            <p className="text-xs text-gray-400 mb-2">
+              발주서 발송 시 기본으로 채워지는 거래처 담당자 이메일입니다 (발송 시 수정 가능)
+            </p>
+            <input
+              type="email"
+              placeholder="order@supplier.com"
+              value={settings.default_po_email}
+              onChange={(e) => setSettings(prev => ({ ...prev, default_po_email: e.target.value }))}
+              className="w-full border rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
           </div>
 
           {/* 저장 버튼 */}

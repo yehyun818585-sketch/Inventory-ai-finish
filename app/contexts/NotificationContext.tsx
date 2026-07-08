@@ -63,7 +63,9 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
           setToastQueue(prev => prev.filter(t => t.id !== row.id))
         }, 6000)
       })
-      .subscribe()
+      .subscribe((status) => {
+        console.log(`🔔 [notifications] realtime status: ${status}`)
+      })
 
     return () => { supabase.removeChannel(channel) }
   }, [profile?.id])
