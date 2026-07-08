@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import { Resend } from 'resend'
-import { getInboundReconciliation, getOutboundReconciliation, getTransferReconciliation, isOverdue } from '@/lib/reconciliation'
+import { getInboundReconciliation, getOutboundReconciliation, getTransferReconciliation, classifyMissing } from '@/lib/reconciliation'
 
 const resend = new Resend(process.env.RESEND_API_KEY)
 
@@ -78,12 +78,12 @@ export async function POST(request: Request) {
     ])
 
     const allMissing = [
-      ...inbound.progress.filter(p => p.remaining_qty > 0).map(p => ({ ...p, source: '입고' })),
-      ...outbound.progress.filter(p => p.remaining_qty > 0).map(p => ({ ...p, source: '출고' })),
-      ...transfer.progress.filter(p => p.remaining_qty > 0).map(p => ({ ...p, source: '이동' }))
+      ...inbound.progress.filter(p => p.remaining_qty > 0).map(p => ({ ...p, source: '입고' as const })),
+      ...outbound.progress.filter(p => p.remaining_qty > 0).map(p => ({ ...p, source: '출고' as const })),
+      ...transfer.progress.filter(p => p.remaining_qty > 0).map(p => ({ ...p, source: '이동' as const }))
     ]
-    // 납기·출고예정일 + 유예(α)를 넘긴 건만 적발 대상 (아직 기한 전인 건은 정상 진행중)
-    const overdueMissing = allMissing.filter(m => isOverdue(m.expected_date, graceDays))
+    // 거래처 확정 납기일 + 유예(α)를 넘긴 건만 적발 대상 (확정 전/기한 전인 건은 알림 대상 아님)
+    const overdueMissing = allMissing.filter(m => classifyMissing(m, graceDays) === 'overdue')
     const stage1List = overdueMissing.filter(m => !m.stage1_alert_sent_at)
     const escalationList = overdueMissing.filter(m => m.stage1_alert_sent_at)
 

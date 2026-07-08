@@ -1,6 +1,8 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import { useRouter } from 'next/navigation'
+import Link from 'next/link'
 import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/app/contexts/AuthContext'
 import Navbar from '@/app/components/Navbar'
@@ -44,6 +46,9 @@ interface ApprovalDocument {
   channel: string | null
   memo: string | null
   expected_date: string | null
+  confirmed_date: string | null
+  supplier_name: string | null
+  order_number: string | null
   requested_by: string | null
   requested_by_user_id: string | null
   approved_by: string | null
@@ -58,6 +63,9 @@ interface ApprovalDocument {
 interface ItemRow {
   product_id: string
   quantity: number
+  isNew: boolean
+  newProductName: string
+  unit_price: string
 }
 
 const DOC_TYPES: DocType[] = ['발주품의서', '출고지시서', '이동품의서']
@@ -65,6 +73,7 @@ const STATUS_TABS: Status[] = ['대기', '승인', '반려']
 
 export default function ApprovalsPage() {
   const { profile } = useAuth()
+  const router = useRouter()
   const [products, setProducts] = useState<Product[]>([])
   const [warehouses, setWarehouses] = useState<Warehouse[]>([])
   const [documents, setDocuments] = useState<ApprovalDocument[]>([])
@@ -79,9 +88,10 @@ export default function ApprovalsPage() {
     to_warehouse_id: '',
     channel: '',
     memo: '',
-    expected_date: ''
+    expected_date: '',
+    supplier_name: ''
   })
-  const [items, setItems] = useState<ItemRow[]>([{ product_id: '', quantity: 0 }])
+  const [items, setItems] = useState<ItemRow[]>([{ product_id: '', quantity: 0, isNew: false, newProductName: '', unit_price: '' }])
   const [saving, setSaving] = useState(false)
   const [progressMap, setProgressMap] = useState<Record<string, ReconciliationProgressRow>>({})
 
@@ -137,6 +147,7 @@ export default function ApprovalsPage() {
       .from('approval_documents')
       .select(`
         id, doc_type, status, warehouse_id, to_warehouse_id, channel, memo, expected_date,
+        confirmed_date, supplier_name, order_number,
         requested_by, requested_by_user_id, approved_by, approved_at, created_at,
         warehouses:warehouse_id (name),
         to_warehouse:to_warehouse_id (name),
@@ -154,10 +165,10 @@ export default function ApprovalsPage() {
   }
 
   function addItemRow() {
-    setItems([...items, { product_id: '', quantity: 0 }])
+    setItems([...items, { product_id: '', quantity: 0, isNew: false, newProductName: '', unit_price: '' }])
   }
 
-  function updateItemRow(idx: number, field: keyof ItemRow, value: string | number) {
+  function updateItemRow(idx: number, field: keyof ItemRow, value: string | number | boolean) {
     const updated = [...items]
     updated[idx] = { ...updated[idx], [field]: value }
     setItems(updated)
@@ -168,15 +179,62 @@ export default function ApprovalsPage() {
   }
 
   function resetForm() {
-    setFormData({ doc_type: '발주품의서', warehouse_id: '', to_warehouse_id: '', channel: '', memo: '', expected_date: '' })
-    setItems([{ product_id: '', quantity: 0 }])
+    setFormData({ doc_type: '발주품의서', warehouse_id: '', to_warehouse_id: '', channel: '', memo: '', expected_date: '', supplier_name: '' })
+    setItems([{ product_id: '', quantity: 0, isNew: false, newProductName: '', unit_price: '' }])
     setShowForm(false)
+  }
+
+  // 새 제품이면 이름으로 찾아서 없으면 생성(온보딩 페이지의 실사입력 upsert 패턴과 동일), 기존 제품이면 그대로 id 반환
+  async function resolveProductId(item: ItemRow, cid: string): Promise<string | null> {
+    if (!item.isNew) return item.product_id || null
+    const name = item.newProductName.trim()
+    if (!name) return null
+
+    const { data: existing } = await supabase
+      .from('products')
+      .select('id')
+      .ilike('product_name', name)
+      .eq('company_id', cid)
+      .maybeSingle()
+    if (existing) return existing.id
+
+    const { data: created } = await supabase
+      .from('products')
+      .insert([{
+        product_name: name,
+        product_code: name.toUpperCase().replace(/\s+/g, '-').slice(0, 10),
+        product_group: '미분류',
+        is_active: true,
+        company_id: cid
+      }])
+      .select('id')
+      .single()
+    return created?.id || null
+  }
+
+  // 발주번호 자동생성: PO-YYMMDD-NN (로트번호와 혼동되지 않도록 PO- 접두어 부여, 날짜는 기안 제출일)
+  async function generateOrderNumber(cid: string): Promise<string> {
+    const today = new Date()
+    const datePart = `${String(today.getFullYear()).slice(2)}${String(today.getMonth() + 1).padStart(2, '0')}${String(today.getDate()).padStart(2, '0')}`
+    const prefix = `PO-${datePart}`
+    const { data } = await supabase
+      .from('approval_documents')
+      .select('order_number')
+      .eq('company_id', cid)
+      .eq('doc_type', '발주품의서')
+      .like('order_number', `${prefix}-%`)
+
+    const maxSeq = (data || []).reduce((max, d) => {
+      const seq = parseInt(d.order_number?.split('-')[2] || '0', 10)
+      return Number.isNaN(seq) ? max : Math.max(max, seq)
+    }, 0)
+    return `${prefix}-${String(maxSeq + 1).padStart(2, '0')}`
   }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
 
-    const validItems = items.filter(i => i.product_id && i.quantity > 0)
+    const validItems = items.filter(i => (i.isNew ? i.newProductName.trim() : i.product_id) && i.quantity > 0)
     if (validItems.length === 0) {
       alert('제품과 수량을 하나 이상 입력해주세요.')
       return
@@ -190,16 +248,23 @@ export default function ApprovalsPage() {
       return
     }
     if ((formData.doc_type === '발주품의서' || formData.doc_type === '출고지시서') && !formData.expected_date) {
-      alert(formData.doc_type === '발주품의서' ? '납기예정일을 입력해주세요.' : '출고예정일을 입력해주세요.')
+      alert(formData.doc_type === '발주품의서' ? '희망 납기일을 입력해주세요.' : '희망 출고예정일을 입력해주세요.')
+      return
+    }
+    if (formData.doc_type === '발주품의서' && !formData.supplier_name.trim()) {
+      alert('거래처명을 입력해주세요.')
       return
     }
 
     setSaving(true)
     try {
+      const cid = profile?.company_id || ''
+      const orderNumber = formData.doc_type === '발주품의서' ? await generateOrderNumber(cid) : null
+
       const { data: doc, error: docError } = await supabase
         .from('approval_documents')
         .insert([{
-          company_id: profile?.company_id,
+          company_id: cid,
           doc_type: formData.doc_type,
           status: '대기',
           warehouse_id: formData.warehouse_id,
@@ -207,6 +272,8 @@ export default function ApprovalsPage() {
           channel: formData.doc_type === '출고지시서' ? (formData.channel || null) : null,
           memo: formData.memo || null,
           expected_date: formData.doc_type !== '이동품의서' ? formData.expected_date : null,
+          supplier_name: formData.doc_type === '발주품의서' ? formData.supplier_name.trim() : null,
+          order_number: orderNumber,
           requested_by: profile?.name || null,
           requested_by_user_id: profile?.id || null
         }])
@@ -218,12 +285,24 @@ export default function ApprovalsPage() {
         return
       }
 
+      const resolvedItems = await Promise.all(validItems.map(async i => ({
+        product_id: await resolveProductId(i, cid),
+        quantity: i.quantity,
+        unit_price: i.unit_price !== '' ? Number(i.unit_price) : null
+      })))
+
+      if (resolvedItems.some(i => !i.product_id)) {
+        alert('신규 제품명을 확인해주세요.')
+        return
+      }
+
       const { error: itemsError } = await supabase
         .from('approval_document_items')
-        .insert(validItems.map(i => ({
+        .insert(resolvedItems.map(i => ({
           document_id: doc.id,
           product_id: i.product_id,
-          quantity: i.quantity
+          quantity: i.quantity,
+          unit_price: i.unit_price
         })))
 
       if (itemsError) {
@@ -241,9 +320,8 @@ export default function ApprovalsPage() {
         return
       }
 
-      alert('기안이 등록되었습니다. 승인 대기 중입니다.')
       resetForm()
-      fetchData()
+      router.push(`/approvals/${doc.id}`)
     } finally {
       setSaving(false)
     }
@@ -352,6 +430,20 @@ export default function ApprovalsPage() {
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {formData.doc_type === '발주품의서' && (
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">거래처명 *</label>
+                      <input
+                        type="text"
+                        required
+                        placeholder="예: OO코스메틱"
+                        value={formData.supplier_name}
+                        onChange={(e) => setFormData({ ...formData, supplier_name: e.target.value })}
+                        className="w-full border rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      />
+                    </div>
+                  )}
+
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">
                       {formData.doc_type === '이동품의서' ? '출발 창고 *' : formData.doc_type === '발주품의서' ? '입고 대상 창고 *' : '출고 창고 *'}
@@ -402,7 +494,7 @@ export default function ApprovalsPage() {
                   {(formData.doc_type === '발주품의서' || formData.doc_type === '출고지시서') && (
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1">
-                        {formData.doc_type === '발주품의서' ? '납기예정일 *' : '출고예정일 *'}
+                        {formData.doc_type === '발주품의서' ? '희망 납기일(요청) *' : '희망 출고예정일(요청) *'}
                       </label>
                       <input
                         type="date"
@@ -411,7 +503,7 @@ export default function ApprovalsPage() {
                         onChange={(e) => setFormData({ ...formData, expected_date: e.target.value })}
                         className="w-full border rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
                       />
-                      <p className="text-xs text-gray-400 mt-1">이 날짜 + 유예기간이 지나도 실물기록이 없으면 미기록으로 적발됩니다</p>
+                      <p className="text-xs text-gray-400 mt-1">정식 날짜는 거래처 확인 후 문서 상세에서 별도로 확정합니다. 확정 전까지는 지연 알림 대상이 아닙니다.</p>
                     </div>
                   )}
                 </div>
@@ -420,23 +512,50 @@ export default function ApprovalsPage() {
                   <label className="block text-sm font-medium text-gray-700 mb-2">품목 *</label>
                   <div className="space-y-2">
                     {items.map((item, idx) => (
-                      <div key={idx} className="flex gap-2 items-center">
-                        <select
-                          value={item.product_id}
-                          onChange={(e) => updateItemRow(idx, 'product_id', e.target.value)}
-                          className="flex-1 border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
+                      <div key={idx} className="flex gap-2 items-center flex-wrap">
+                        {item.isNew ? (
+                          <input
+                            type="text"
+                            placeholder="신규 제품명 입력"
+                            value={item.newProductName}
+                            onChange={(e) => updateItemRow(idx, 'newProductName', e.target.value)}
+                            className="flex-1 min-w-[140px] border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
+                          />
+                        ) : (
+                          <select
+                            value={item.product_id}
+                            onChange={(e) => updateItemRow(idx, 'product_id', e.target.value)}
+                            className="flex-1 min-w-[140px] border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
+                          >
+                            <option value="">제품 선택</option>
+                            {products.map(p => (
+                              <option key={p.id} value={p.id}>{p.product_name} ({p.product_code})</option>
+                            ))}
+                          </select>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => updateItemRow(idx, 'isNew', !item.isNew)}
+                          className={`text-xs px-2 py-1.5 rounded-lg border shrink-0 ${
+                            item.isNew ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-gray-200 text-gray-500 hover:border-gray-300'
+                          }`}
                         >
-                          <option value="">제품 선택</option>
-                          {products.map(p => (
-                            <option key={p.id} value={p.id}>{p.product_name} ({p.product_code})</option>
-                          ))}
-                        </select>
+                          신규 제품
+                        </button>
                         <input
                           type="number"
                           placeholder="수량"
                           min="1"
                           value={item.quantity || ''}
                           onChange={(e) => updateItemRow(idx, 'quantity', Number(e.target.value))}
+                          className="w-24 border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
+                        />
+                        <input
+                          type="number"
+                          placeholder="단가(선택)"
+                          min="0"
+                          value={item.unit_price}
+                          onChange={(e) => updateItemRow(idx, 'unit_price', e.target.value)}
                           className="w-28 border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
                         />
                         {items.length > 1 && (
@@ -445,6 +564,7 @@ export default function ApprovalsPage() {
                       </div>
                     ))}
                   </div>
+                  <p className="text-xs text-gray-400 mt-1">단가를 비우면 제품 기본원가를 사용합니다</p>
                   <button type="button" onClick={addItemRow} className="text-sm text-blue-600 hover:underline mt-2">
                     + 품목 추가
                   </button>
@@ -513,6 +633,10 @@ export default function ApprovalsPage() {
                       <div className="flex justify-between items-start gap-3 flex-wrap">
                         <div>
                           <p className="text-sm text-gray-500">
+                            <Link href={`/approvals/${doc.id}`} className="text-blue-600 hover:underline font-medium">
+                              {doc.order_number || '문서 보기'}
+                            </Link>
+                            {doc.supplier_name && <span className="ml-2">{doc.supplier_name} ·</span>}{' '}
                             {doc.doc_type === '이동품의서'
                               ? `${doc.warehouses?.name} → ${doc.to_warehouse?.name}`
                               : doc.doc_type === '출고지시서'

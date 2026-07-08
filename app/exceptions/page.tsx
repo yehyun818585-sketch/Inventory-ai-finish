@@ -10,7 +10,7 @@ import {
   getTransferReconciliation,
   getInboundEvidenceExceptions,
   getOutboundEvidenceExceptions,
-  isOverdue,
+  classifyMissing,
   ReconciliationProgressRow,
   UnmatchedRow,
   EvidenceExceptionRow,
@@ -41,6 +41,7 @@ export default function ExceptionsPage() {
   const [evidenceExceptions, setEvidenceExceptions] = useState<LabeledEvidence[]>([])
   const [nonTransport, setNonTransport] = useState<NonTransportRow[]>([])
   const [pendingMissing, setPendingMissing] = useState<LabeledMissing[]>([])
+  const [awaitingConfirmation, setAwaitingConfirmation] = useState<LabeledMissing[]>([])
   const [graceDays, setGraceDays] = useState(3)
   const [loading, setLoading] = useState(true)
 
@@ -74,8 +75,9 @@ export default function ExceptionsPage() {
       ...outbound.progress.filter(p => p.remaining_qty > 0).map(p => ({ ...p, source: '출고' as SourceLabel })),
       ...transfer.progress.filter(p => p.remaining_qty > 0).map(p => ({ ...p, source: '이동' as SourceLabel }))
     ]
-    setMissing(allMissing.filter(m => isOverdue(m.expected_date, grace)))
-    setPendingMissing(allMissing.filter(m => !isOverdue(m.expected_date, grace)))
+    setMissing(allMissing.filter(m => classifyMissing(m, grace) === 'overdue'))
+    setPendingMissing(allMissing.filter(m => classifyMissing(m, grace) === 'pending'))
+    setAwaitingConfirmation(allMissing.filter(m => classifyMissing(m, grace) === 'awaiting'))
 
     setUnmatched([
       ...inbound.unmatched.map(u => ({ ...u, source: '입고' as SourceLabel })),
@@ -191,7 +193,7 @@ export default function ExceptionsPage() {
                 🚨 기한 초과 미기록/미달 ({missing.length}건)
               </h2>
               <p className="text-xs text-gray-400 mt-1">
-                납기·출고예정일 + 유예({graceDays}일)을 넘겼는데도 실물 처리가 안 됐거나 부족한 건
+                거래처 확정 납기일 + 유예({graceDays}일)을 넘겼는데도 실물 처리가 안 됐거나 부족한 건
               </p>
             </div>
             <div className="p-3 md:p-6">
@@ -219,9 +221,11 @@ export default function ExceptionsPage() {
                   ))}
                 </div>
               )}
-              {pendingMissing.length > 0 && (
+              {(pendingMissing.length > 0 || awaitingConfirmation.length > 0) && (
                 <p className="text-xs text-gray-400 mt-4">
-                  진행중(예정일 내) {pendingMissing.length}건 — 아직 기한 전이라 예외 아님
+                  {pendingMissing.length > 0 && `진행중(확정 기한 내) ${pendingMissing.length}건`}
+                  {pendingMissing.length > 0 && awaitingConfirmation.length > 0 && ' · '}
+                  {awaitingConfirmation.length > 0 && `확정 대기 ${awaitingConfirmation.length}건 — 거래처 납기 확정 전이라 예외 아님`}
                 </p>
               )}
             </div>

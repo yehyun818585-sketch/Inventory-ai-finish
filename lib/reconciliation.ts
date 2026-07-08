@@ -15,6 +15,17 @@ export function isOverdue(expectedDate: string | null, graceDays: number): boole
   return new Date() > due
 }
 
+// 이동품의서는 확정납기 개념이 없어 항상 expected_date 기준(=항상 즉시노출)으로 판단.
+// 발주/출고는 거래처가 실제 확정해준 confirmed_date가 있어야 기한초과 여부를 판단할 수 있음 — 없으면 "확정 대기".
+export function classifyMissing(
+  row: { source: '입고' | '출고' | '이동'; expected_date: string | null; confirmed_date: string | null },
+  graceDays: number
+): 'overdue' | 'pending' | 'awaiting' {
+  if (row.source === '이동') return isOverdue(row.expected_date, graceDays) ? 'overdue' : 'pending'
+  if (!row.confirmed_date) return 'awaiting'
+  return isOverdue(row.confirmed_date, graceDays) ? 'overdue' : 'pending'
+}
+
 export interface ReconciliationProgressRow {
   document_id: string
   product_id: string
@@ -27,6 +38,7 @@ export interface ReconciliationProgressRow {
   approved_by: string | null
   approved_at: string | null
   expected_date: string | null
+  confirmed_date: string | null
   stage1_alert_sent_at: string | null
   escalated_at: string | null
 }
@@ -58,7 +70,7 @@ async function reconcile(
     .from('approval_documents')
     .select(`
       id, warehouse_id, to_warehouse_id, channel, approved_by, approved_at, created_at,
-      expected_date, stage1_alert_sent_at, escalated_at,
+      expected_date, confirmed_date, stage1_alert_sent_at, escalated_at,
       warehouses:warehouse_id ( name ),
       to_warehouse:to_warehouse_id ( name ),
       approval_document_items ( product_id, quantity, products ( product_name, product_code ) )
@@ -115,6 +127,7 @@ async function reconcile(
         approved_by: doc.approved_by,
         approved_at: doc.approved_at,
         expected_date: doc.expected_date ?? null,
+        confirmed_date: doc.confirmed_date ?? null,
         stage1_alert_sent_at: doc.stage1_alert_sent_at ?? null,
         escalated_at: doc.escalated_at ?? null
       })
