@@ -420,8 +420,12 @@ export default function ApprovalDetailPage() {
                       <th className="border px-3 py-2 text-left">번호</th>
                       <th className="border px-3 py-2 text-left">품명</th>
                       <th className="border px-3 py-2 text-right">수량</th>
-                      <th className="border px-3 py-2 text-right">단가</th>
-                      <th className="border px-3 py-2 text-right">금액</th>
+                      {doc.doc_type !== '출고지시서' && (
+                        <>
+                          <th className="border px-3 py-2 text-right">단가</th>
+                          <th className="border px-3 py-2 text-right">금액</th>
+                        </>
+                      )}
                     </tr>
                   </thead>
                   <tbody>
@@ -433,12 +437,16 @@ export default function ApprovalDetailPage() {
                             <td className="border px-3 py-2">{i + 1}</td>
                             <td className="border px-3 py-2">{item.products?.product_name} <span className="text-gray-400">({item.products?.product_code})</span></td>
                             <td className="border px-3 py-2 text-right">{item.quantity.toLocaleString()}</td>
-                            <td className="border px-3 py-2 text-right">{item.unit_price != null ? item.unit_price.toLocaleString() : '-'}</td>
-                            <td className="border px-3 py-2 text-right">{item.unit_price != null ? (item.unit_price * item.quantity).toLocaleString() : '-'}</td>
+                            {doc.doc_type !== '출고지시서' && (
+                              <>
+                                <td className="border px-3 py-2 text-right">{item.unit_price != null ? item.unit_price.toLocaleString() : '-'}</td>
+                                <td className="border px-3 py-2 text-right">{item.unit_price != null ? (item.unit_price * item.quantity).toLocaleString() : '-'}</td>
+                              </>
+                            )}
                           </tr>
                           {doc.doc_type === '출고지시서' && preview && (
                             <tr>
-                              <td className="border-x px-3 py-1.5 bg-blue-50" colSpan={5}>
+                              <td className="border-x px-3 py-1.5 bg-blue-50" colSpan={3}>
                                 <span className="text-xs text-blue-700">
                                   예상 출고 로트: {preview.breakdown.length === 0
                                     ? '가용 재고 없음'

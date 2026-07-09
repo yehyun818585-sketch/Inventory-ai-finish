@@ -110,6 +110,7 @@ export default function ApprovalsPage() {
   const [parsingFile, setParsingFile] = useState(false)
   const [unmatchedNames, setUnmatchedNames] = useState<string[]>([])
   const [shippingCutoffTime, setShippingCutoffTime] = useState('15:00')
+  const [batchOrderAt, setBatchOrderAt] = useState<Date | null>(null)
 
   useEffect(() => {
     fetchData()
@@ -214,6 +215,7 @@ export default function ApprovalsPage() {
     setChannelMode('그 외')
     setChannelOrderFile(null)
     setUnmatchedNames([])
+    setBatchOrderAt(null)
     setShowForm(false)
   }
 
@@ -277,6 +279,7 @@ export default function ApprovalsPage() {
 
       const aggregated: Record<string, number> = {}
       const unmatched: string[] = []
+      let latestOrderAt: Date | null = null
 
       rows.forEach(row => {
         const orderNo = String(row['주문번호'] || row['상품주문번호'] || '').trim()
@@ -286,6 +289,14 @@ export default function ApprovalsPage() {
         const option = String(row['옵션정보'] || '').trim()
         const qty = Number(row['수량'] || 0)
         if (!name || qty <= 0) return
+
+        const orderAtRaw = String(row['주문일시'] || row['결제일시'] || '').trim()
+        if (orderAtRaw) {
+          const parsed = new Date(orderAtRaw.replace(' ', 'T'))
+          if (!isNaN(parsed.getTime()) && (!latestOrderAt || parsed > latestOrderAt)) {
+            latestOrderAt = parsed
+          }
+        }
 
         const combined = `${name} ${option}`.toUpperCase()
         const matched = products.find(p =>
@@ -305,6 +316,7 @@ export default function ApprovalsPage() {
 
       if (newItems.length > 0) setItems(newItems)
       setUnmatchedNames(unmatched)
+      setBatchOrderAt(latestOrderAt)
     } catch {
       alert('엑셀 파싱에 실패했습니다. 파일 형식을 확인해주세요.')
     } finally {
@@ -312,15 +324,16 @@ export default function ApprovalsPage() {
     }
   }
 
-  // 출고지시서 전용: 확정일은 사람이 판단할 거리가 아니라 회사가 정한 마감시간 규칙의 결과값이라
-  // 기안 시점에 자동 계산한다 (마감 전=당일, 마감 후=익일).
-  function computeOutboundConfirmedDate(cutoffTime: string): string {
-    const now = new Date()
+  // 출고지시서 전용: 확정일은 "기안하는 시각"이 아니라 "그 배치 안 주문들이 마감 전/후 건이냐"로 정해야 한다.
+  // 마감 직후에 기안해도 그 배치가 마감 전 주문이면 당일 출고이고, 반대로 마감 한참 후 주문을
+  // 퇴근 전에 미리 기안해둬도 그 주문 자체가 마감 후 건이면 익일 출고이기 때문 — 그래서 기준 시각을
+  // "지금(now)"이 아니라 엑셀에서 뽑은 "배치 내 최신 주문일시"로 받는다.
+  function computeOutboundConfirmedDate(cutoffTime: string, referenceDate: Date): string {
     const [h, m] = cutoffTime.split(':').map(Number)
-    const cutoff = new Date(now)
+    const cutoff = new Date(referenceDate)
     cutoff.setHours(h, m, 0, 0)
-    const target = new Date(now)
-    if (now > cutoff) target.setDate(target.getDate() + 1)
+    const target = new Date(referenceDate)
+    if (referenceDate > cutoff) target.setDate(target.getDate() + 1)
     const y = target.getFullYear()
     const mo = String(target.getMonth() + 1).padStart(2, '0')
     const d = String(target.getDate()).padStart(2, '0')
@@ -383,7 +396,7 @@ export default function ApprovalsPage() {
       // 출고지시서 확정일: 자사몰은 마감시간 규칙으로 자동계산, 그 외(올리브영 등)는 거래처
       // 발주서에 이미 날짜가 있으니 기안 시점에 입력한 값을 그대로 확정일로 씀(별도 확정 절차 불필요).
       const outboundDate = formData.doc_type === '출고지시서'
-        ? (channelMode === '자사몰' ? computeOutboundConfirmedDate(shippingCutoffTime) : formData.expected_date)
+        ? (channelMode === '자사몰' ? computeOutboundConfirmedDate(shippingCutoffTime, batchOrderAt || new Date()) : formData.expected_date)
         : null
 
       const { data: doc, error: docError } = await supabase
@@ -519,6 +532,7 @@ export default function ApprovalsPage() {
                             setFormData({ ...formData, doc_type: dt, to_warehouse_id: '', channel: '' })
                             setChannelOrderFile(null)
                             setUnmatchedNames([])
+                            setBatchOrderAt(null)
                             setChannelMode('그 외')
                           }}
                           className="mr-2"
@@ -632,9 +646,13 @@ export default function ApprovalsPage() {
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1">확정 출고일</label>
                       <p className="border rounded-lg px-4 py-2 bg-gray-50 text-gray-700">
-                        {computeOutboundConfirmedDate(shippingCutoffTime)} (자동 계산됨)
+                        {batchOrderAt
+                          ? `${computeOutboundConfirmedDate(shippingCutoffTime, batchOrderAt)} (자동 계산됨)`
+                          : '엑셀 첨부 후 자동으로 표시됩니다'}
                       </p>
-                      <p className="text-xs text-gray-400 mt-1">배송 마감시간({shippingCutoffTime}) 기준으로 자동 계산되어 별도 입력이 필요 없습니다.</p>
+                      <p className="text-xs text-gray-400 mt-1">
+                        배치 안 최신 주문일시가 배송 마감시간({shippingCutoffTime}) 전이면 당일, 후면 익일로 자동 계산됩니다.
+                      </p>
                     </div>
                   )}
                 </div>
@@ -647,7 +665,7 @@ export default function ApprovalsPage() {
                         <input
                           type="radio"
                           checked={channelMode === '자사몰'}
-                          onChange={() => { setChannelMode('자사몰'); setChannelOrderFile(null); setUnmatchedNames([]) }}
+                          onChange={() => { setChannelMode('자사몰'); setChannelOrderFile(null); setUnmatchedNames([]); setBatchOrderAt(null) }}
                           className="mr-1.5"
                         />
                         자사몰 (엑셀 자동집계)
@@ -656,7 +674,7 @@ export default function ApprovalsPage() {
                         <input
                           type="radio"
                           checked={channelMode === '그 외'}
-                          onChange={() => { setChannelMode('그 외'); setChannelOrderFile(null); setUnmatchedNames([]) }}
+                          onChange={() => { setChannelMode('그 외'); setChannelOrderFile(null); setUnmatchedNames([]); setBatchOrderAt(null) }}
                           className="mr-1.5"
                         />
                         그 외(올리브영 등, 수동입력)
@@ -732,21 +750,25 @@ export default function ApprovalsPage() {
                           onChange={(e) => updateItemRow(idx, 'quantity', Number(e.target.value))}
                           className="w-24 border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
                         />
-                        <input
-                          type="number"
-                          placeholder="단가(선택)"
-                          min="0"
-                          value={item.unit_price}
-                          onChange={(e) => updateItemRow(idx, 'unit_price', e.target.value)}
-                          className="w-28 border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
-                        />
+                        {formData.doc_type !== '출고지시서' && (
+                          <input
+                            type="number"
+                            placeholder="단가(선택)"
+                            min="0"
+                            value={item.unit_price}
+                            onChange={(e) => updateItemRow(idx, 'unit_price', e.target.value)}
+                            className="w-28 border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
+                          />
+                        )}
                         {items.length > 1 && (
                           <button type="button" onClick={() => removeItemRow(idx)} className="text-gray-400 hover:text-red-500 px-2">✕</button>
                         )}
                       </div>
                     ))}
                   </div>
-                  <p className="text-xs text-gray-400 mt-1">단가를 비우면 제품 기본원가를 사용합니다</p>
+                  {formData.doc_type !== '출고지시서' && (
+                    <p className="text-xs text-gray-400 mt-1">단가를 비우면 제품 기본원가를 사용합니다</p>
+                  )}
                   <button type="button" onClick={addItemRow} className="text-sm text-blue-600 hover:underline mt-2">
                     + 품목 추가
                   </button>
