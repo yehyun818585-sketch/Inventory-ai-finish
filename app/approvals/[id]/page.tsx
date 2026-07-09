@@ -55,6 +55,12 @@ interface DocumentDetail {
   approval_steps: ApprovalStep[]
 }
 
+// 희망일/확정일이 이미 YYYY-MM-DD 문자열이라, 작성일자도 같은 표기로 맞춘다 (toLocaleDateString의 "2026. 7. 9." 형식과 안 섞이게).
+function formatDate(input: string): string {
+  const d = new Date(input)
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+
 export default function ApprovalDetailPage() {
   const { id } = useParams<{ id: string }>()
   const router = useRouter()
@@ -342,7 +348,7 @@ export default function ApprovalDetailPage() {
                 <div className="bg-gray-50 px-3 py-2 font-medium text-gray-500">작성자</div>
                 <div className="px-3 py-2">{doc.requested_by || '-'}</div>
                 <div className="bg-gray-50 px-3 py-2 font-medium text-gray-500">작성일자</div>
-                <div className="px-3 py-2">{new Date(doc.created_at).toLocaleDateString('ko-KR')}</div>
+                <div className="px-3 py-2">{formatDate(doc.created_at)}</div>
 
                 {doc.supplier_name && (
                   <>
