@@ -13,6 +13,8 @@ interface CompanySettings {
   shelf_life_warning_ratio: number
   inventory_unit: string
   reconciliation_grace_days: number
+  outbound_grace_days: number
+  shipping_cutoff_time: string
 }
 
 const INDUSTRY_PRESETS: Record<string, { default_shelf_life_months: number; inventory_unit: string }> = {
@@ -29,7 +31,9 @@ export default function SettingsPage() {
     default_shelf_life_months: 24,
     shelf_life_warning_ratio: 0.25,
     inventory_unit: '개',
-    reconciliation_grace_days: 3
+    reconciliation_grace_days: 3,
+    outbound_grace_days: 0,
+    shipping_cutoff_time: '15:00'
   })
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
@@ -42,7 +46,7 @@ export default function SettingsPage() {
   async function fetchSettings() {
     const { data } = await supabase
       .from('companies')
-      .select('name, industry, default_shelf_life_months, shelf_life_warning_ratio, inventory_unit, reconciliation_grace_days')
+      .select('name, industry, default_shelf_life_months, shelf_life_warning_ratio, inventory_unit, reconciliation_grace_days, outbound_grace_days, shipping_cutoff_time')
       .eq('id', profile!.company_id!)
       .single()
 
@@ -53,7 +57,9 @@ export default function SettingsPage() {
         default_shelf_life_months: data.default_shelf_life_months || 24,
         shelf_life_warning_ratio: data.shelf_life_warning_ratio || 0.25,
         inventory_unit: data.inventory_unit || '개',
-        reconciliation_grace_days: data.reconciliation_grace_days ?? 3
+        reconciliation_grace_days: data.reconciliation_grace_days ?? 3,
+        outbound_grace_days: data.outbound_grace_days ?? 0,
+        shipping_cutoff_time: (data.shipping_cutoff_time || '15:00').slice(0, 5)
       })
     }
     setLoading(false)
@@ -83,7 +89,9 @@ export default function SettingsPage() {
         default_shelf_life_months: settings.default_shelf_life_months,
         shelf_life_warning_ratio: settings.shelf_life_warning_ratio,
         inventory_unit: settings.inventory_unit,
-        reconciliation_grace_days: settings.reconciliation_grace_days
+        reconciliation_grace_days: settings.reconciliation_grace_days,
+        outbound_grace_days: settings.outbound_grace_days,
+        shipping_cutoff_time: settings.shipping_cutoff_time
       })
       .eq('id', profile.company_id)
       .select()
@@ -232,13 +240,13 @@ export default function SettingsPage() {
 
           <hr />
 
-          {/* 미기록 유예일수(α) */}
+          {/* 미기록 유예일수(α) - 입고/이동 */}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
-              미기록 유예일수 (α)
+              미기록 유예일수 — 입고/이동 (α)
             </label>
             <p className="text-xs text-gray-400 mb-2">
-              발주품의서/출고지시서의 납기·출고예정일로부터 며칠 지나야 미기록으로 적발할지 설정합니다
+              발주품의서/이동품의서의 납기·이동예정일로부터 며칠 지나야 미기록으로 적발할지 설정합니다 (거래처 등 외부 변수로 며칠 밀릴 수 있어 유예를 둡니다)
             </p>
             <input
               type="number"
@@ -249,6 +257,41 @@ export default function SettingsPage() {
               className="w-32 border rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
             />
             <span className="ml-2 text-gray-500 text-sm">일</span>
+          </div>
+
+          {/* 미기록 유예일수 - 출고 */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              미기록 유예일수 — 출고
+            </label>
+            <p className="text-xs text-gray-400 mb-2">
+              출고는 회사가 정한 마감 규칙으로 확정일이 정해지는 거라 외부 변수로 밀릴 여지가 거의 없습니다. 보통 0~1일을 권장합니다.
+            </p>
+            <input
+              type="number"
+              min="0"
+              max="30"
+              value={settings.outbound_grace_days}
+              onChange={(e) => setSettings(prev => ({ ...prev, outbound_grace_days: Number(e.target.value) }))}
+              className="w-32 border rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
+            <span className="ml-2 text-gray-500 text-sm">일</span>
+          </div>
+
+          {/* 배송 마감시간 */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              배송 마감시간
+            </label>
+            <p className="text-xs text-gray-400 mb-2">
+              하루 1회 발송 기준 마감시간입니다 (예: 15:00 이전 확정 출고는 당일, 이후는 익일). 알림 문구에 표시됩니다.
+            </p>
+            <input
+              type="time"
+              value={settings.shipping_cutoff_time}
+              onChange={(e) => setSettings(prev => ({ ...prev, shipping_cutoff_time: e.target.value }))}
+              className="w-40 border rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
           </div>
 
           {/* 거래처 관리 링크 */}

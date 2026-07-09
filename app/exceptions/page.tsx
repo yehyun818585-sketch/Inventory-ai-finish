@@ -54,6 +54,7 @@ export default function ExceptionsPage() {
   const [pendingMissing, setPendingMissing] = useState<LabeledMissing[]>([])
   const [awaitingConfirmation, setAwaitingConfirmation] = useState<LabeledMissing[]>([])
   const [graceDays, setGraceDays] = useState(3)
+  const [outboundGraceDays, setOutboundGraceDays] = useState(0)
   const [loading, setLoading] = useState(true)
 
   const [attachingId, setAttachingId] = useState<string | null>(null)
@@ -71,7 +72,7 @@ export default function ExceptionsPage() {
   async function load(companyId: string) {
     setLoading(true)
     const [{ data: companyData }, inbound, outbound, transfer, inboundEvidence, outboundEvidence, { data: completedTx }] = await Promise.all([
-      supabase.from('companies').select('reconciliation_grace_days').eq('id', companyId).single(),
+      supabase.from('companies').select('reconciliation_grace_days, outbound_grace_days').eq('id', companyId).single(),
       getInboundReconciliation(companyId),
       getOutboundReconciliation(companyId),
       getTransferReconciliation(companyId),
@@ -86,16 +87,19 @@ export default function ExceptionsPage() {
         .order('created_at', { ascending: false })
     ])
     const grace = companyData?.reconciliation_grace_days ?? 3
+    const outboundGrace = companyData?.outbound_grace_days ?? 0
     setGraceDays(grace)
+    setOutboundGraceDays(outboundGrace)
+    const graceBySource = { default: grace, outbound: outboundGrace }
 
     const allMissing: LabeledMissing[] = [
       ...inbound.progress.filter(p => p.remaining_qty > 0).map(p => ({ ...p, source: '입고' as SourceLabel })),
       ...outbound.progress.filter(p => p.remaining_qty > 0).map(p => ({ ...p, source: '출고' as SourceLabel })),
       ...transfer.progress.filter(p => p.remaining_qty > 0).map(p => ({ ...p, source: '이동' as SourceLabel }))
     ]
-    setMissing(allMissing.filter(m => classifyMissing(m, grace) === 'overdue'))
-    setPendingMissing(allMissing.filter(m => classifyMissing(m, grace) === 'pending'))
-    setAwaitingConfirmation(allMissing.filter(m => classifyMissing(m, grace) === 'awaiting'))
+    setMissing(allMissing.filter(m => classifyMissing(m, graceBySource) === 'overdue'))
+    setPendingMissing(allMissing.filter(m => classifyMissing(m, graceBySource) === 'pending'))
+    setAwaitingConfirmation(allMissing.filter(m => classifyMissing(m, graceBySource) === 'awaiting'))
 
     setUnmatched([
       ...inbound.unmatched.map(u => ({ ...u, source: '입고' as SourceLabel })),
@@ -226,7 +230,7 @@ export default function ExceptionsPage() {
                 🚨 기한 초과 미기록/미달 ({missing.length}건)
               </h2>
               <p className="text-xs text-gray-400 mt-1">
-                거래처 확정 납기일 + 유예({graceDays}일)을 넘겼는데도 실물 처리가 안 됐거나 부족한 건
+                거래처 확정 납기일 + 유예(입고/이동 {graceDays}일, 출고 {outboundGraceDays}일)을 넘겼는데도 실물 처리가 안 됐거나 부족한 건
               </p>
             </div>
             <div className="p-3 md:p-6">

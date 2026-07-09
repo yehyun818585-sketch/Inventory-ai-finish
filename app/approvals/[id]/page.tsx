@@ -1,10 +1,11 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { Fragment, useEffect, useState } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/app/contexts/AuthContext'
 import Navbar from '@/app/components/Navbar'
+import { previewFifoDeduction, LotPreviewResult } from '@/lib/lotPreview'
 
 type DocType = '발주품의서' | '출고지시서' | '이동품의서'
 type Status = '대기' | '승인' | '반려'
@@ -14,7 +15,7 @@ interface DocItem {
   product_id: string
   quantity: number
   unit_price: number | null
-  products: { product_name: string; product_code: string } | null
+  products: { product_name: string; product_code: string; shelf_life_months: number | null } | null
 }
 
 interface ApprovalStep {
@@ -63,6 +64,7 @@ export default function ApprovalDetailPage() {
   const [showEvidence, setShowEvidence] = useState(false)
   const [signedUrl, setSignedUrl] = useState<string | null>(null)
   const [channelFileSignedUrl, setChannelFileSignedUrl] = useState<string | null>(null)
+  const [lotPreviews, setLotPreviews] = useState<Record<string, LotPreviewResult>>({})
 
   const [showConfirmForm, setShowConfirmForm] = useState(false)
   const [confirmedDate, setConfirmedDate] = useState('')
@@ -89,14 +91,26 @@ export default function ApprovalDetailPage() {
         requested_by, requested_by_user_id, approved_by, approved_at, created_at,
         warehouses:warehouse_id (name),
         to_warehouse:to_warehouse_id (name),
-        approval_document_items ( id, product_id, quantity, unit_price, products (product_name, product_code) ),
+        approval_document_items ( id, product_id, quantity, unit_price, products (product_name, product_code, shelf_life_months) ),
         approval_steps ( id, step_order, status, acted_by_name, acted_at )
       `)
       .eq('id', id)
       .single()
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    setDoc((data as any) || null)
+    const loadedDoc = (data as any) || null
+    setDoc(loadedDoc)
     setLoading(false)
+
+    if (loadedDoc?.doc_type === '출고지시서' && loadedDoc.warehouse_id) {
+      const previews: Record<string, LotPreviewResult> = {}
+      await Promise.all(loadedDoc.approval_document_items.map(async (item: DocItem) => {
+        const shelfLifeMonths = item.products?.shelf_life_months || 24
+        previews[item.id] = await previewFifoDeduction(
+          supabase, item.product_id, loadedDoc.warehouse_id, item.quantity, shelfLifeMonths
+        )
+      }))
+      setLotPreviews(previews)
+    }
   }
 
   async function viewEvidence() {
@@ -411,17 +425,41 @@ export default function ApprovalDetailPage() {
                     </tr>
                   </thead>
                   <tbody>
-                    {doc.approval_document_items.map((item, i) => (
-                      <tr key={item.id}>
-                        <td className="border px-3 py-2">{i + 1}</td>
-                        <td className="border px-3 py-2">{item.products?.product_name} <span className="text-gray-400">({item.products?.product_code})</span></td>
-                        <td className="border px-3 py-2 text-right">{item.quantity.toLocaleString()}</td>
-                        <td className="border px-3 py-2 text-right">{item.unit_price != null ? item.unit_price.toLocaleString() : '-'}</td>
-                        <td className="border px-3 py-2 text-right">{item.unit_price != null ? (item.unit_price * item.quantity).toLocaleString() : '-'}</td>
-                      </tr>
-                    ))}
+                    {doc.approval_document_items.map((item, i) => {
+                      const preview = lotPreviews[item.id]
+                      return (
+                        <Fragment key={item.id}>
+                          <tr>
+                            <td className="border px-3 py-2">{i + 1}</td>
+                            <td className="border px-3 py-2">{item.products?.product_name} <span className="text-gray-400">({item.products?.product_code})</span></td>
+                            <td className="border px-3 py-2 text-right">{item.quantity.toLocaleString()}</td>
+                            <td className="border px-3 py-2 text-right">{item.unit_price != null ? item.unit_price.toLocaleString() : '-'}</td>
+                            <td className="border px-3 py-2 text-right">{item.unit_price != null ? (item.unit_price * item.quantity).toLocaleString() : '-'}</td>
+                          </tr>
+                          {doc.doc_type === '출고지시서' && preview && (
+                            <tr>
+                              <td className="border-x px-3 py-1.5 bg-blue-50" colSpan={5}>
+                                <span className="text-xs text-blue-700">
+                                  예상 출고 로트: {preview.breakdown.length === 0
+                                    ? '가용 재고 없음'
+                                    : preview.breakdown.map(b => `${b.lot_number || '(미지정)'} ${b.quantity.toLocaleString()}개`).join(' + ')}
+                                  {preview.shortfall > 0 && (
+                                    <span className="text-orange-600"> · 재고 부족 {preview.shortfall.toLocaleString()}개</span>
+                                  )}
+                                </span>
+                              </td>
+                            </tr>
+                          )}
+                        </Fragment>
+                      )
+                    })}
                   </tbody>
                 </table>
+                {doc.doc_type === '출고지시서' && (
+                  <p className="text-xs text-gray-400 mt-1">
+                    * 현재 재고 기준 예상치이며, 실제 피킹 시점 재고 변동에 따라 달라질 수 있습니다. (만료/임박 로트 제외, 오래된 로트부터 순서)
+                  </p>
+                )}
               </div>
 
               {doc.memo && (

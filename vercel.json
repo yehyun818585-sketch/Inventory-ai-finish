@@ -1,0 +1,8 @@
+{
+  "crons": [
+    {
+      "path": "/api/cron/reconciliation-alert",
+      "schedule": "0 0 * * *"
+    }
+  ]
+}

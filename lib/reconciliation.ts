@@ -19,13 +19,17 @@ export function isOverdue(expectedDate: string | null, graceDays: number): boole
 
 // 이동품의서는 확정납기 개념이 없어 항상 expected_date 기준(=항상 즉시노출)으로 판단.
 // 발주/출고는 거래처가 실제 확정해준 confirmed_date가 있어야 기한초과 여부를 판단할 수 있음 — 없으면 "확정 대기".
+//
+// 출고는 회사가 스스로 정한 마감 규칙(예: 15시 이전 주문=당일출고)의 결과로 확정일이 정해지는 거라
+// 외부 변수로 밀릴 여지가 거의 없다 — 그래서 입고/이동과 다른(보통 훨씬 짧은) 유예일수를 따로 받는다.
 export function classifyMissing(
   row: { source: '입고' | '출고' | '이동'; expected_date: string | null; confirmed_date: string | null },
-  graceDays: number
+  graceDays: { default: number; outbound: number }
 ): 'overdue' | 'pending' | 'awaiting' {
-  if (row.source === '이동') return isOverdue(row.expected_date, graceDays) ? 'overdue' : 'pending'
+  const grace = row.source === '출고' ? graceDays.outbound : graceDays.default
+  if (row.source === '이동') return isOverdue(row.expected_date, grace) ? 'overdue' : 'pending'
   if (!row.confirmed_date) return 'awaiting'
-  return isOverdue(row.confirmed_date, graceDays) ? 'overdue' : 'pending'
+  return isOverdue(row.confirmed_date, grace) ? 'overdue' : 'pending'
 }
 
 export interface ReconciliationProgressRow {

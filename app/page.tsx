@@ -1,9 +1,18 @@
 'use client'
 
 import { useEffect, useState, useRef } from 'react'
+import Link from 'next/link'
 import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/app/contexts/AuthContext'
 import Navbar from '@/app/components/Navbar'
+import {
+  getInboundReconciliation,
+  getOutboundReconciliation,
+  getTransferReconciliation,
+  getInboundEvidenceExceptions,
+  getOutboundEvidenceExceptions,
+  classifyMissing
+} from '@/lib/reconciliation'
 
 // ── 타입 ────────────────────────────────────────────────
 interface Product {
@@ -90,6 +99,7 @@ export default function Home() {
   const [selectedWarehouse, setSelectedWarehouse] = useState('전체')
   const [inventorySearch, setInventorySearch] = useState('')
   const [briefing, setBriefing] = useState<AiBriefing | null>(null)
+  const [actionAlerts, setActionAlerts] = useState({ overdueCount: 0, evidenceCount: 0 })
 
   // Command bar
   const [command, setCommand] = useState('')
@@ -112,6 +122,7 @@ export default function Home() {
   useEffect(() => {
     if (!profile?.company_id) return
     fetchData()
+    loadActionAlerts(profile.company_id)
     setRecentCmds(getRecentCommands())
   }, [profile?.company_id])
 
@@ -154,6 +165,30 @@ export default function Home() {
     if (result.sent) {
       await supabase.from('companies').update({ last_reconciliation_alert_at: new Date().toISOString() }).eq('id', companyId)
     }
+  }
+
+  // 대시보드 진입 시마다 "조치 필요" 배너용 카운트 계산 (기한초과 미기록/미달 + 증빙 미첨부/불일치)
+  async function loadActionAlerts(companyId: string) {
+    const [{ data: companyData }, inbound, outbound, transfer, inboundEvidence, outboundEvidence] = await Promise.all([
+      supabase.from('companies').select('reconciliation_grace_days, outbound_grace_days').eq('id', companyId).single(),
+      getInboundReconciliation(companyId),
+      getOutboundReconciliation(companyId),
+      getTransferReconciliation(companyId),
+      getInboundEvidenceExceptions(companyId),
+      getOutboundEvidenceExceptions(companyId)
+    ])
+    const graceBySource = {
+      default: companyData?.reconciliation_grace_days ?? 3,
+      outbound: companyData?.outbound_grace_days ?? 0
+    }
+    const allMissing = [
+      ...inbound.progress.map(p => ({ ...p, source: '입고' as const })),
+      ...outbound.progress.map(p => ({ ...p, source: '출고' as const })),
+      ...transfer.progress.map(p => ({ ...p, source: '이동' as const }))
+    ].filter(p => p.remaining_qty > 0)
+    const overdueCount = allMissing.filter(m => classifyMissing(m, graceBySource) === 'overdue').length
+    const evidenceCount = inboundEvidence.length + outboundEvidence.exceptions.length
+    setActionAlerts({ overdueCount, evidenceCount })
   }
 
   async function fetchData() {
@@ -548,6 +583,28 @@ export default function Home() {
                 )}
               </div>
             </div>
+
+            {/* 조치 필요 배너 (최근 입출고 아래, 같은 열) */}
+            {(actionAlerts.overdueCount > 0 || actionAlerts.evidenceCount > 0) && (
+              <div className="lg:col-start-4 lg:col-span-2 bg-red-50 border border-red-200 rounded-xl p-3 md:p-5">
+                <h2 className="text-sm font-semibold text-red-700 mb-2">⚠️ 조치 필요</h2>
+                <div className="flex flex-col gap-1.5 text-sm">
+                  {actionAlerts.overdueCount > 0 && (
+                    <p className="text-red-700">
+                      기한 초과 미기록/미달 <span className="font-bold">{actionAlerts.overdueCount}건</span>
+                    </p>
+                  )}
+                  {actionAlerts.evidenceCount > 0 && (
+                    <p className="text-red-700">
+                      증빙 미첨부/불일치 <span className="font-bold">{actionAlerts.evidenceCount}건</span>
+                    </p>
+                  )}
+                </div>
+                <Link href="/exceptions" className="inline-block text-xs text-red-700 underline mt-2">
+                  예외리스트에서 확인하기 →
+                </Link>
+              </div>
+            )}
 
           </div>
         </div>
