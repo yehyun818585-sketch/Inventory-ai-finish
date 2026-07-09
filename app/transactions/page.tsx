@@ -18,6 +18,11 @@ interface Warehouse {
   name: string
 }
 
+interface Channel {
+  id: string
+  name: string
+}
+
 interface Transaction {
   id: string
   product_id: string
@@ -40,6 +45,7 @@ export default function TransactionsPage() {
   const { profile } = useAuth()
   const [products, setProducts] = useState<Product[]>([])
   const [warehouses, setWarehouses] = useState<Warehouse[]>([])
+  const [channels, setChannels] = useState<Channel[]>([])
   const [transactions, setTransactions] = useState<Transaction[]>([])
   const [loading, setLoading] = useState(true)
   const [showForm, setShowForm] = useState(false)
@@ -142,6 +148,12 @@ export default function TransactionsPage() {
       .select('id, name')
       .eq('company_id', cid)
 
+    const { data: channelsData } = await supabase
+      .from('channels')
+      .select('id, name')
+      .eq('company_id', cid)
+      .order('name', { ascending: true })
+
     const { data: transactionsData } = await supabase
       .from('transactions')
       .select(`
@@ -155,6 +167,7 @@ export default function TransactionsPage() {
 
     setProducts(productsData || [])
     setWarehouses(warehousesData || [])
+    setChannels(channelsData || [])
     setTransactions(transactionsData || [])
     setLoading(false)
   }
@@ -868,13 +881,22 @@ export default function TransactionsPage() {
                 <label className="block text-sm font-medium text-gray-700 mb-1">
                   채널 (출고 시)
                 </label>
-                <input
-                  type="text"
-                  placeholder="예: 올리브영, 홈쇼핑"
-                  value={formData.channel}
-                  onChange={(e) => setFormData({...formData, channel: e.target.value})}
-                  className="w-full border rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-green-500"
-                />
+                {channels.length === 0 ? (
+                  <p className="text-sm text-gray-500">
+                    등록된 채널이 없습니다. <a href="/settings/channels" className="text-blue-600 hover:underline">채널 관리에서 먼저 등록해주세요 →</a>
+                  </p>
+                ) : (
+                  <select
+                    value={formData.channel}
+                    onChange={(e) => setFormData({...formData, channel: e.target.value})}
+                    className="w-full border rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-green-500"
+                  >
+                    <option value="">채널 선택 (출고 시)</option>
+                    {channels.map((c) => (
+                      <option key={c.id} value={c.name}>{c.name}</option>
+                    ))}
+                  </select>
+                )}
               </div>
               {formData.type === '입고' && (
                 <>

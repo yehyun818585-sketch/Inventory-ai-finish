@@ -409,6 +409,12 @@ export async function POST(request: Request) {
       .eq('company_id', company_id)
     const warehouseNames = (warehouseList || []).map((w: { name: string }) => w.name).join(', ')
 
+    const { data: channelList } = await getSupabaseAdmin()
+      .from('channels')
+      .select('name')
+      .eq('company_id', company_id)
+    const channelNames = (channelList || []).map((c: { name: string }) => c.name).join(', ')
+
     const systemPrompt = `당신은 재고관리 AI 어시스턴트입니다. 오늘: ${todayStr}
 
 ## 도구 활용 원칙
@@ -473,11 +479,13 @@ export async function POST(request: Request) {
 - ★ get_inventory 결과를 받은 즉시 tool 재호출 없이 반드시 JSON으로 최종 응답
 - 가용 재고 >= 요청 수량 → 즉시 action:"출고" JSON 반환
 - 가용 재고 < 요청 수량 → action:"질문"으로 "현재 가용 재고는 N개입니다. N개로 출고할까요?" 안내
-- 사용자가 채널/목적지 언급 → channel에 그대로 사용 (예: "올리브영", "쿠팡")
-  예) "올리브영 출고" → channel:"올리브영" / "쿠팡 출고" → channel:"쿠팡"
+- 등록된 채널: ${channelNames || '(등록된 채널 없음)'}
+- 사용자가 채널/목적지를 언급하면, 오타·줄임말이어도(예: "올영", "올리부영" → "올리브영") **위 등록된 채널 목록 중 가장 가까운 정확한 이름**으로 channel을 채울 것 — 목록에 없는 이름을 임의로 지어내지 말 것
+  예) "올영 출고" → channel:"올리브영" (목록에 "올리브영"이 있을 때)
+- 사용자가 말한 채널이 등록된 목록 중 **어디에도 뚜렷하게 대응되지 않으면** → action:"질문"으로 "등록된 채널 중 어디인가요? (${channelNames})" 안내 (임의로 비슷한 값 만들어내지 말 것)
 - 사용자가 "~창고로 이동", "~로 보내" 등 이동 표현 사용 → action:"창고이동", to_warehouse 설정
-- 채널도 to_warehouse도 없으면 → action:"질문"으로 "외부 채널 출고인가요(올리브영, 쿠팡 등), 창고 간 이동인가요?" 안내
-- "기타", "내부" 같은 임의 채널값 절대 금지
+- 채널도 to_warehouse도 없으면 → action:"질문"으로 "외부 채널 출고인가요(${channelNames}), 창고 간 이동인가요?" 안내
+- 등록된 채널 목록에 없는 임의 채널값 절대 금지
 
 ## 기획세트 출고 규칙
 - "기획세트 출고", "기획 출고", 기획명으로 출고 요청 시 → 반드시 get_plans tool 먼저 호출 (search 없이 전체 목록 조회)

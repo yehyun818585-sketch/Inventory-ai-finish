@@ -308,6 +308,20 @@ export default function SettingsPage() {
             </Link>
           </div>
 
+          {/* 채널 관리 링크 */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">채널</label>
+            <p className="text-xs text-gray-400 mb-2">
+              출고지시서에 쓸 채널(자사몰, 올리브영 등)은 별도 페이지에서 등록합니다.
+            </p>
+            <Link
+              href="/settings/channels"
+              className="inline-block text-sm bg-gray-100 text-gray-700 px-4 py-2 rounded-lg hover:bg-gray-200 transition"
+            >
+              채널 관리 →
+            </Link>
+          </div>
+
           {/* 저장 버튼 */}
           <div className="pt-2">
             <button

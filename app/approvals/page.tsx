@@ -29,6 +29,11 @@ interface Supplier {
   contact_email: string | null
 }
 
+interface Channel {
+  id: string
+  name: string
+}
+
 interface DocItem {
   id: string
   product_id: string
@@ -85,6 +90,7 @@ export default function ApprovalsPage() {
   const [products, setProducts] = useState<Product[]>([])
   const [warehouses, setWarehouses] = useState<Warehouse[]>([])
   const [suppliers, setSuppliers] = useState<Supplier[]>([])
+  const [channels, setChannels] = useState<Channel[]>([])
   const [documents, setDocuments] = useState<ApprovalDocument[]>([])
   const [loading, setLoading] = useState(true)
   const [showForm, setShowForm] = useState(false)
@@ -166,6 +172,12 @@ export default function ApprovalsPage() {
       .eq('company_id', cid)
       .order('name', { ascending: true })
 
+    const { data: channelsData } = await supabase
+      .from('channels')
+      .select('id, name')
+      .eq('company_id', cid)
+      .order('name', { ascending: true })
+
     const { data: companyData } = await supabase
       .from('companies')
       .select('shipping_cutoff_time')
@@ -190,6 +202,7 @@ export default function ApprovalsPage() {
     setProducts(productsData || [])
     setWarehouses(warehousesData || [])
     setSuppliers(suppliersData || [])
+    setChannels(channelsData || [])
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     setDocuments((documentsData as any) || [])
     setLoading(false)
@@ -369,6 +382,10 @@ export default function ApprovalsPage() {
     const selectedSupplier = suppliers.find(s => s.id === formData.supplier_id)
     if (formData.doc_type === '발주품의서' && !selectedSupplier) {
       alert('거래처를 선택해주세요.')
+      return
+    }
+    if (formData.doc_type === '출고지시서' && !formData.channel) {
+      alert('채널을 선택해주세요.')
       return
     }
     if (formData.doc_type === '출고지시서' && !channelOrderFile) {
@@ -603,14 +620,24 @@ export default function ApprovalsPage() {
 
                   {formData.doc_type === '출고지시서' && (
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">채널</label>
-                      <input
-                        type="text"
-                        placeholder="예: 올리브영, 자사몰(카페24)"
-                        value={formData.channel}
-                        onChange={(e) => setFormData({ ...formData, channel: e.target.value })}
-                        className="w-full border rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                      />
+                      <label className="block text-sm font-medium text-gray-700 mb-1">채널 *</label>
+                      {channels.length === 0 ? (
+                        <p className="text-sm text-gray-500">
+                          등록된 채널이 없습니다. <Link href="/settings/channels" className="text-blue-600 hover:underline">채널 관리에서 먼저 등록해주세요 →</Link>
+                        </p>
+                      ) : (
+                        <select
+                          required
+                          value={formData.channel}
+                          onChange={(e) => setFormData({ ...formData, channel: e.target.value })}
+                          className="w-full border rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        >
+                          <option value="">채널 선택</option>
+                          {channels.map(c => (
+                            <option key={c.id} value={c.name}>{c.name}</option>
+                          ))}
+                        </select>
+                      )}
                     </div>
                   )}
 

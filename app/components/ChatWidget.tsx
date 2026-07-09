@@ -16,6 +16,11 @@ interface Warehouse {
   name: string
 }
 
+interface Channel {
+  id: string
+  name: string
+}
+
 interface InventoryItem {
   product_id: string
   warehouse_id: string
@@ -59,6 +64,21 @@ function getTodayISO(): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 }
 
+// AI가 뽑아낸 채널 문자열(오타/줄임말 가능)을 등록된 채널 목록의 정확한 이름으로 치환.
+// 등록된 채널이 하나도 없으면(설정 안 한 회사) 하위호환으로 그대로 통과시킨다.
+function resolveRegisteredChannel(
+  channelInput: string | null | undefined,
+  channels: { name: string }[]
+): { name: string | null; unmatched: boolean } {
+  if (!channelInput) return { name: null, unmatched: false }
+  if (channels.length === 0) return { name: channelInput, unmatched: false }
+  const exact = channels.find(c => c.name === channelInput)
+  if (exact) return { name: exact.name, unmatched: false }
+  const fuzzy = channels.find(c => c.name.includes(channelInput) || channelInput.includes(c.name))
+  if (fuzzy) return { name: fuzzy.name, unmatched: false }
+  return { name: null, unmatched: true }
+}
+
 function isPersistedMessageList(v: unknown): v is Message[] {
   if (!Array.isArray(v) || v.length === 0) return false
   return v.every(
@@ -76,6 +96,7 @@ export default function ChatWidget() {
   const [isOpen, setIsOpen] = useState(false)
   const [products, setProducts] = useState<Product[]>([])
   const [warehouses, setWarehouses] = useState<Warehouse[]>([])
+  const [channels, setChannels] = useState<Channel[]>([])
   // inventory 상태는 resolveWarehouse에서 실시간 Supabase 직접 조회로 대체됨
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [todayTransactions, setTodayTransactions] = useState<any[]>([])
@@ -230,6 +251,11 @@ export default function ChatWidget() {
       .select('id, name')
       .eq('company_id', cid)
 
+    const { data: channelsData } = await supabase
+      .from('channels')
+      .select('id, name')
+      .eq('company_id', cid)
+
     const todayStart = new Date()
     todayStart.setHours(0, 0, 0, 0)
     const { data: txData } = await supabase
@@ -241,6 +267,7 @@ export default function ChatWidget() {
 
     setProducts(productsData || [])
     setWarehouses(warehousesData || [])
+    setChannels(channelsData || [])
     setTodayTransactions(txData || [])
   }
 
@@ -330,6 +357,19 @@ export default function ChatWidget() {
   // GPT 응답 후 제품 매칭 → 창고 선택
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   async function resolveAction(data: any) {
+    if (data.channel) {
+      const { name, unmatched } = resolveRegisteredChannel(data.channel, channels)
+      if (unmatched) {
+        const channelNames = channels.map(c => c.name).join(', ')
+        setMessages(prev => [...prev, {
+          role: 'assistant',
+          content: `"${data.channel}" 채널을 찾을 수 없습니다. 등록된 채널 중 어디인가요? (${channelNames})`
+        }])
+        return
+      }
+      data = { ...data, channel: name }
+    }
+
     const keyword = data.product_name || ''
     const matched = products.filter(p =>
       p.product_name.includes(keyword) || p.product_code.includes(keyword)
@@ -474,7 +514,18 @@ export default function ChatWidget() {
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   async function executePlanOutbound(data: any) {
-    const { plan_id, plan_name, quantity: setQty, channel } = data
+    const { plan_id, plan_name, quantity: setQty } = data
+
+    const { name: resolvedChannel, unmatched } = resolveRegisteredChannel(data.channel, channels)
+    if (unmatched) {
+      const channelNames = channels.map(c => c.name).join(', ')
+      setMessages(prev => [...prev, {
+        role: 'assistant',
+        content: `"${data.channel}" 채널을 찾을 수 없습니다. 등록된 채널 중 어디인가요? (${channelNames})`
+      }])
+      return
+    }
+    const channel = resolvedChannel
 
     // 1. BOM 조회
     const { data: planData, error } = await supabase
