@@ -53,6 +53,12 @@ const DEFAULT_CHAT_MESSAGES: Message[] = [
   }
 ]
 
+// 오늘 날짜(YYYY-MM-DD)를 로컬 기준으로 계산. AI가 반환한 date가 "오늘"인지 판단하는 데 사용.
+function getTodayISO(): string {
+  const d = new Date()
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+
 function isPersistedMessageList(v: unknown): v is Message[] {
   if (!Array.isArray(v) || v.length === 0) return false
   return v.every(
@@ -706,7 +712,9 @@ export default function ChatWidget() {
 
         // 날짜 처리
         const transactionDate = pendingAction.date
-          ? new Date(pendingAction.date + 'T09:00:00').toISOString()
+          ? (pendingAction.date === getTodayISO()
+              ? new Date().toISOString() // 오늘로 지정된 경우 실제 지금 시각 사용 (승인 등 다른 이벤트와의 선후관계가 꼬이지 않게)
+              : new Date(pendingAction.date + 'T09:00:00').toISOString())
           : new Date().toISOString()
 
         // 로트별 FIFO 이동
@@ -782,7 +790,9 @@ export default function ChatWidget() {
       } else {
         // 날짜 처리: 지정된 날짜가 있으면 사용, 없으면 현재 시간
         const transactionDate = pendingAction.date
-          ? new Date(pendingAction.date + 'T09:00:00').toISOString()
+          ? (pendingAction.date === getTodayISO()
+              ? new Date().toISOString() // 오늘로 지정된 경우 실제 지금 시각 사용 (승인 등 다른 이벤트와의 선후관계가 꼬이지 않게)
+              : new Date(pendingAction.date + 'T09:00:00').toISOString())
           : new Date().toISOString()
 
         // 출고인 경우: 임박/만료 제외 후 가용 재고 체크
