@@ -343,8 +343,14 @@ export default function ApprovalsPage() {
       alert('도착 창고를 선택해주세요.')
       return
     }
-    if ((formData.doc_type === '발주품의서' || formData.doc_type === '출고지시서') && !formData.expected_date) {
-      alert(formData.doc_type === '발주품의서' ? '희망 납기일을 입력해주세요.' : '희망 출고예정일을 입력해주세요.')
+    if (formData.doc_type === '발주품의서' && !formData.expected_date) {
+      alert('희망 납기일을 입력해주세요.')
+      return
+    }
+    // 출고지시서: 자사몰은 마감시간 기준 자동계산이라 별도 입력 불필요, 그 외(올리브영 등)는
+    // 거래처 발주서에 이미 날짜가 있으니 수동 입력을 그대로 요구한다.
+    if (formData.doc_type === '출고지시서' && channelMode === '그 외' && !formData.expected_date) {
+      alert('확정 출고일을 입력해주세요.')
       return
     }
     const selectedSupplier = suppliers.find(s => s.id === formData.supplier_id)
@@ -374,6 +380,12 @@ export default function ApprovalsPage() {
         channelOrderFileUrl = path
       }
 
+      // 출고지시서 확정일: 자사몰은 마감시간 규칙으로 자동계산, 그 외(올리브영 등)는 거래처
+      // 발주서에 이미 날짜가 있으니 기안 시점에 입력한 값을 그대로 확정일로 씀(별도 확정 절차 불필요).
+      const outboundDate = formData.doc_type === '출고지시서'
+        ? (channelMode === '자사몰' ? computeOutboundConfirmedDate(shippingCutoffTime) : formData.expected_date)
+        : null
+
       const { data: doc, error: docError } = await supabase
         .from('approval_documents')
         .insert([{
@@ -385,8 +397,8 @@ export default function ApprovalsPage() {
           channel: formData.doc_type === '출고지시서' ? (formData.channel || null) : null,
           channel_order_file_url: channelOrderFileUrl,
           memo: formData.memo || null,
-          expected_date: formData.doc_type !== '이동품의서' ? formData.expected_date : null,
-          confirmed_date: formData.doc_type === '출고지시서' ? computeOutboundConfirmedDate(shippingCutoffTime) : null,
+          expected_date: formData.doc_type === '발주품의서' ? formData.expected_date : outboundDate,
+          confirmed_date: outboundDate,
           supplier_id: formData.doc_type === '발주품의서' ? selectedSupplier!.id : null,
           supplier_name: formData.doc_type === '발주품의서' ? selectedSupplier!.name : null,
           order_number: orderNumber,
@@ -588,11 +600,9 @@ export default function ApprovalsPage() {
                     </div>
                   )}
 
-                  {(formData.doc_type === '발주품의서' || formData.doc_type === '출고지시서') && (
+                  {formData.doc_type === '발주품의서' && (
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">
-                        {formData.doc_type === '발주품의서' ? '희망 납기일(요청) *' : '희망 출고예정일(요청) *'}
-                      </label>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">희망 납기일(요청) *</label>
                       <input
                         type="date"
                         required
@@ -601,6 +611,30 @@ export default function ApprovalsPage() {
                         className="w-full border rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
                       />
                       <p className="text-xs text-gray-400 mt-1">정식 날짜는 거래처 확인 후 문서 상세에서 별도로 확정합니다. 확정 전까지는 지연 알림 대상이 아닙니다.</p>
+                    </div>
+                  )}
+
+                  {formData.doc_type === '출고지시서' && channelMode === '그 외' && (
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">확정 출고일 *</label>
+                      <input
+                        type="date"
+                        required
+                        value={formData.expected_date}
+                        onChange={(e) => setFormData({ ...formData, expected_date: e.target.value })}
+                        className="w-full border rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      />
+                      <p className="text-xs text-gray-400 mt-1">거래처 발주서에 적힌 날짜를 그대로 입력하세요. 별도 확정 절차 없이 이 값이 바로 확정일로 저장됩니다.</p>
+                    </div>
+                  )}
+
+                  {formData.doc_type === '출고지시서' && channelMode === '자사몰' && (
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">확정 출고일</label>
+                      <p className="border rounded-lg px-4 py-2 bg-gray-50 text-gray-700">
+                        {computeOutboundConfirmedDate(shippingCutoffTime)} (자동 계산됨)
+                      </p>
+                      <p className="text-xs text-gray-400 mt-1">배송 마감시간({shippingCutoffTime}) 기준으로 자동 계산되어 별도 입력이 필요 없습니다.</p>
                     </div>
                   )}
                 </div>
