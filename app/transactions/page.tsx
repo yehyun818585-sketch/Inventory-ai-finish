@@ -37,8 +37,17 @@ interface Transaction {
   note: string | null
   recorded_by: string | null
   created_at: string
+  return_of_transaction_id: string | null
+  evidence_file_url: string | null
   products: Product | null
   warehouses: Warehouse | null
+}
+
+interface ReturnSourceOption {
+  id: string
+  quantity: number
+  channel: string | null
+  created_at: string
 }
 
 export default function TransactionsPage() {
@@ -69,8 +78,12 @@ export default function TransactionsPage() {
     lot_number: '',          // 로트번호 (입고 시 필수, 형식: YYMMDD-NN)
     transaction_date: '',    // 거래 날짜 (기본값: 오늘)
     stock_type: '일반',      // 재고 구분: 일반 / 기획용
-    lot_unit_cost: ''        // 이번 입고 원가 (기획용일 때 직접 입력, 빈값이면 제품 기본원가)
+    lot_unit_cost: '',       // 이번 입고 원가 (기획용일 때 직접 입력, 빈값이면 제품 기본원가)
+    return_of_transaction_id: '', // 반품 입고 시: 원 출고 건 참조 (근거 없는 반품 차단)
+    quarantine: false        // 반품 입고 시: 재판매 불가(격리) 처리 여부 — 실물 확인 후 담당자가 최종 판단
   })
+  const [returnPhoto, setReturnPhoto] = useState<File | null>(null)
+  const [returnSourceOptions, setReturnSourceOptions] = useState<ReturnSourceOption[]>([])
 
   // 로트번호 형식 검증 (YYMMDD-NN)
   function isValidLotNumber(lot: string): boolean {
@@ -92,6 +105,19 @@ export default function TransactionsPage() {
     if (lotDate > today) return false
 
     return true
+  }
+
+  // 반품 입고 자동판정(제안)용 — 출고 FIFO의 임박 기준(잔여 유통기한 25% 이하)과 동일 기준 재사용.
+  // 반품통보서엔 로트가 안 적혀있어 실물 로트로만 판단 가능하므로, 최종 확정은 담당자 체크박스에 맡긴다.
+  function suggestReturnQuarantine(lotNumber: string, shelfLifeMonths: number): boolean | null {
+    if (!lotNumber || !/^\d{6}-\d{2}$/.test(lotNumber)) return null
+    const y = parseInt('20' + lotNumber.substring(0, 2))
+    const m = parseInt(lotNumber.substring(2, 4)) - 1
+    const d = parseInt(lotNumber.substring(4, 6))
+    const expiry = new Date(y, m, d)
+    expiry.setMonth(expiry.getMonth() + shelfLifeMonths)
+    const days = Math.ceil((expiry.getTime() - new Date().getTime()) / (1000 * 60 * 60 * 24))
+    return days <= shelfLifeMonths * 30 * 0.25
   }
 
   // 오늘 날짜로 로트번호 기본값 생성
@@ -130,6 +156,23 @@ export default function TransactionsPage() {
 
     return () => { supabase.removeChannel(channel) }
   }, [profile?.company_id]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // 반품 입고 선택 시: 근거 없는 반품 차단을 위해 참조할 원 출고 건 후보를 불러옴
+  useEffect(() => {
+    if (formData.type !== '입고' || formData.sub_type !== '반품' || !formData.product_id || !profile?.company_id) {
+      setReturnSourceOptions([])
+      return
+    }
+    supabase
+      .from('transactions')
+      .select('id, quantity, channel, created_at')
+      .eq('company_id', profile.company_id)
+      .eq('type', '출고')
+      .eq('product_id', formData.product_id)
+      .order('created_at', { ascending: false })
+      .limit(30)
+      .then(({ data }) => setReturnSourceOptions(data || []))
+  }, [formData.type, formData.sub_type, formData.product_id, profile?.company_id])
 
   async function fetchData() {
     if (!profile?.company_id) return
@@ -201,6 +244,12 @@ export default function TransactionsPage() {
     // 출고인 경우 사유 필수
     if (formData.type === '출고' && !formData.sub_type) {
       alert('출고 사유를 선택해주세요. (판매 / 샘플 / 폐기)')
+      return
+    }
+
+    // 반품 입고인 경우 원 출고 건 참조 필수 (근거 없는 반품 입고 차단)
+    if (formData.type === '입고' && formData.sub_type === '반품' && !formData.return_of_transaction_id) {
+      alert('반품 대상 출고 건을 선택해주세요.')
       return
     }
 
@@ -380,21 +429,39 @@ export default function TransactionsPage() {
 
       // 재고 업데이트 (로트번호 기준 관리)
       if (formData.type === '입고') {
-        // 입고: 제품+창고+로트번호로 로트 찾기
+        const isReturn = formData.sub_type === '반품'
+        // 반품 입고: 격리 체크 시 '반품격리'로 별도 관리(정상 로트와 섞이지 않게), 아니면 원래 로트('일반')로 복원
+        const effectiveStockType = isReturn ? (formData.quarantine ? '반품격리' : '일반') : formData.stock_type
+
+        // 반품 박스 라벨 사진(선택) 업로드
+        let returnPhotoUrl: string | null = null
+        if (isReturn && returnPhoto) {
+          const ext = returnPhoto.name.split('.').pop() || 'bin'
+          const path = `${profile?.company_id}/returns/${Date.now()}.${ext}`
+          const { error: uploadError } = await supabase.storage.from('evidence').upload(path, returnPhoto)
+          if (uploadError) {
+            alert('박스 라벨 사진 업로드 실패: ' + uploadError.message)
+            return
+          }
+          returnPhotoUrl = path
+        }
+
+        // 입고: 제품+창고+로트번호+재고구분으로 로트 찾기 (재고구분까지 함께 봐야 일반/기획용/반품격리가 서로 안 섞임)
         const { data: existingInventory } = await supabase
           .from('inventory')
           .select('*')
           .eq('product_id', formData.product_id)
           .eq('warehouse_id', formData.warehouse_id)
           .eq('lot_number', formData.lot_number)
-          .single()
+          .eq('stock_type', effectiveStockType)
+          .maybeSingle()
 
         if (existingInventory) {
           await supabase
             .from('inventory')
             .update({
               quantity: existingInventory.quantity + formData.quantity,
-              stock_type: formData.stock_type,
+              stock_type: effectiveStockType,
               lot_unit_cost: formData.lot_unit_cost !== '' ? Number(formData.lot_unit_cost) : existingInventory.lot_unit_cost,
               updated_at: new Date().toISOString()
             })
@@ -407,7 +474,7 @@ export default function TransactionsPage() {
               warehouse_id: formData.warehouse_id,
               quantity: formData.quantity,
               lot_number: formData.lot_number,
-              stock_type: formData.stock_type,
+              stock_type: effectiveStockType,
               lot_unit_cost: formData.lot_unit_cost !== '' ? Number(formData.lot_unit_cost) : null,
               company_id: profile?.company_id
             }])
@@ -415,29 +482,35 @@ export default function TransactionsPage() {
 
         // 입고 기록 저장
         const inboundResultingQty = await getTotalInventory(formData.product_id, formData.warehouse_id)
+        const returnSource = isReturn ? returnSourceOptions.find(o => o.id === formData.return_of_transaction_id) : null
+        const returnNote = isReturn
+          ? `[반품] 원출고 ${returnSource ? `${new Date(returnSource.created_at).toLocaleDateString('ko-KR')} ${returnSource.quantity.toLocaleString()}개${returnSource.channel ? ` (${returnSource.channel})` : ''}` : ''}${formData.quarantine ? ' · 격리(재판매 불가)' : ''}`
+          : null
         const { error: txError } = await supabase
           .from('transactions')
           .insert([{
             product_id: formData.product_id,
             warehouse_id: formData.warehouse_id,
             type: '입고',
-            sub_type: null,
+            sub_type: isReturn ? '반품' : null,
             quantity: formData.quantity,
             resulting_quantity: inboundResultingQty,
             lot_number: formData.lot_number || null,
-            stock_type: formData.stock_type || '일반',
+            stock_type: effectiveStockType || '일반',
             channel: formData.channel || null,
-            note: formData.note || null,
+            note: isReturn ? (formData.note ? `${formData.note} | ${returnNote}` : returnNote) : (formData.note || null),
             recorded_by: profile?.name || null,
             created_at: transactionDate,
-            company_id: profile?.company_id
+            company_id: profile?.company_id,
+            return_of_transaction_id: isReturn ? formData.return_of_transaction_id : null,
+            evidence_file_url: returnPhotoUrl
           }])
         if (txError) { alert('기록 실패: ' + txError.message); return }
       } else {
         // 출고: 만료/임박 로트 제외, 정상 로트만 FIFO (로트번호 오름차순)
         const { data: inventoryLots } = await supabase
           .from('inventory')
-          .select('id, quantity, lot_number')
+          .select('id, quantity, lot_number, stock_type')
           .eq('product_id', formData.product_id)
           .eq('warehouse_id', formData.warehouse_id)
           .gt('quantity', 0)
@@ -464,9 +537,14 @@ export default function TransactionsPage() {
           return result
         }
 
+        // 반품격리 재고(재판매 불가 판정)는 일반 출고(판매/샘플)에서 제외 — 재출고→재반품 악순환 방지.
+        // 폐기는 격리재고를 정리(불용재고 처리)하는 목적이라 예외적으로 포함시킨다.
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const isQuarantined = (lot: any): boolean => lot.stock_type === '반품격리' && formData.sub_type !== '폐기'
+
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const eligible = (inventoryLots || [])
-          .filter((lot: any) => !isExpiredOrWarning(lot))
+          .filter((lot: any) => !isExpiredOrWarning(lot) && !isQuarantined(lot))
           .sort((a: any, b: any) => {
             if (a.lot_number && b.lot_number) return a.lot_number.localeCompare(b.lot_number)
             return 0
@@ -475,7 +553,7 @@ export default function TransactionsPage() {
 
         const eligibleTotal = eligible.reduce((sum: number, lot: any) => sum + lot.quantity, 0)
         if (eligibleTotal < formData.quantity) {
-          alert(`출고 가능 재고 부족!\n\n만료/임박 로트 제외 후 가용 재고: ${eligibleTotal.toLocaleString()}개\n요청: ${formData.quantity.toLocaleString()}개\n\n(만료/임박 로트는 출고에서 제외됩니다)`)
+          alert(`출고 가능 재고 부족!\n\n만료/임박/격리 로트 제외 후 가용 재고: ${eligibleTotal.toLocaleString()}개\n요청: ${formData.quantity.toLocaleString()}개\n\n(만료/임박 로트 및 반품격리 로트는 일반 출고에서 제외됩니다)`)
           return
         }
 
@@ -531,8 +609,11 @@ export default function TransactionsPage() {
       lot_number: '',
       transaction_date: '',
       stock_type: '일반',
-      lot_unit_cost: ''
+      lot_unit_cost: '',
+      return_of_transaction_id: '',
+      quarantine: false
     })
+    setReturnPhoto(null)
     setShowForm(false)
     fetchData()
   }
@@ -916,6 +997,98 @@ export default function TransactionsPage() {
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-2">
+                      입고 구분 *
+                    </label>
+                    <div className="flex gap-3">
+                      <button
+                        type="button"
+                        onClick={() => setFormData({...formData, sub_type: ''})}
+                        className={`flex-1 py-2 rounded-lg border-2 text-sm font-medium transition ${
+                          formData.sub_type !== '반품'
+                            ? 'border-green-500 bg-green-50 text-green-700'
+                            : 'border-gray-200 text-gray-500 hover:border-gray-300'
+                        }`}
+                      >
+                        일반 입고
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setFormData({...formData, sub_type: '반품', return_of_transaction_id: ''})}
+                        className={`flex-1 py-2 rounded-lg border-2 text-sm font-medium transition ${
+                          formData.sub_type === '반품'
+                            ? 'border-purple-500 bg-purple-50 text-purple-700'
+                            : 'border-gray-200 text-gray-500 hover:border-gray-300'
+                        }`}
+                      >
+                        반품 입고
+                      </button>
+                    </div>
+                  </div>
+                  {formData.sub_type === '반품' ? (
+                    <>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">
+                          반품 대상 출고 건 *
+                        </label>
+                        {returnSourceOptions.length === 0 ? (
+                          <p className="text-sm text-gray-500">이 제품의 출고 기록이 없습니다. 제품을 먼저 선택해주세요.</p>
+                        ) : (
+                          <select
+                            required
+                            value={formData.return_of_transaction_id}
+                            onChange={(e) => setFormData({...formData, return_of_transaction_id: e.target.value})}
+                            className="w-full border rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-purple-500"
+                          >
+                            <option value="">출고 건 선택</option>
+                            {returnSourceOptions.map(o => (
+                              <option key={o.id} value={o.id}>
+                                {new Date(o.created_at).toLocaleDateString('ko-KR')} · {o.quantity.toLocaleString()}개{o.channel ? ` · ${o.channel}` : ''}
+                              </option>
+                            ))}
+                          </select>
+                        )}
+                        <p className="text-xs text-gray-400 mt-1">근거 없는 반품 입고를 막기 위해, 어느 출고 건의 반품인지 반드시 연결합니다.</p>
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">
+                          박스 라벨 사진 <span className="text-gray-400 font-normal">(선택)</span>
+                        </label>
+                        <input
+                          type="file"
+                          accept="image/*"
+                          onChange={(e) => setReturnPhoto(e.target.files?.[0] || null)}
+                          className="text-sm"
+                        />
+                      </div>
+                      <div className="md:col-span-2 bg-purple-50 border border-purple-200 rounded-lg p-3">
+                        {(() => {
+                          const selectedProduct = products.find(p => p.id === formData.product_id)
+                          const shelfLifeMonths = selectedProduct?.shelf_life_months || 24
+                          const suggested = suggestReturnQuarantine(formData.lot_number, shelfLifeMonths)
+                          return (
+                            <p className="text-xs text-purple-700 mb-2">
+                              {suggested === null
+                                ? '로트번호를 입력하면 잔여 유통기한 기준 자동판정을 안내합니다.'
+                                : suggested
+                                ? '자동판정: 임박/만료 로트 — 격리 처리를 권장합니다. 실물 확인 후 최종 결정해주세요.'
+                                : '자동판정: 재판매 가능 — 정상 로트로 복원됩니다.'}
+                            </p>
+                          )
+                        })()}
+                        <label className="flex items-center text-sm">
+                          <input
+                            type="checkbox"
+                            checked={formData.quarantine}
+                            onChange={(e) => setFormData({...formData, quarantine: e.target.checked})}
+                            className="mr-2"
+                          />
+                          격리 처리 (재판매 불가 — 정상 재고와 분리해 일반 출고에서 제외)
+                        </label>
+                      </div>
+                    </>
+                  ) : (
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
                       재고 구분 *
                     </label>
                     <div className="flex gap-3">
@@ -944,7 +1117,8 @@ export default function TransactionsPage() {
                     </div>
                     <p className="text-xs text-gray-400 mt-1">기획세트 출고 시 기획용 재고만 차감됩니다</p>
                   </div>
-                  {formData.stock_type === '기획용' && (
+                  )}
+                  {formData.stock_type === '기획용' && formData.sub_type !== '반품' && (
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1">
                         이번 입고 원가 <span className="text-gray-400 font-normal">(원/개)</span>
@@ -1052,15 +1226,26 @@ export default function TransactionsPage() {
                         {isTransfer && additionalNote && (
                           <p className="text-xs text-gray-400">메모: {additionalNote}</p>
                         )}
+                        {tx.stock_type === '반품격리' && (
+                          <p className="text-xs text-purple-600 font-medium">🔒 격리 재고 (재판매 불가)</p>
+                        )}
                         {!isTransfer && (() => {
                           const lotMatch = tx.note?.match(/\[로트\] (.+)$/)
                           const lotInfo = lotMatch?.[1] ?? null
+                          const returnMatch = tx.note?.match(/\[반품\] (.+?)(?:\s*\|\s*\[로트\]|$)/)
+                          const returnInfo = returnMatch?.[1] ?? null
                           const userNote = tx.note
-                            ? tx.note.replace(/\s*\|\s*\[로트\].*$/, '').replace(/^\[로트\].*$/, '').trim() || null
+                            ? tx.note
+                                .replace(/\s*\|\s*\[로트\].*$/, '')
+                                .replace(/^\[로트\].*$/, '')
+                                .replace(/\s*\|\s*\[반품\].*$/, '')
+                                .replace(/^\[반품\].*$/, '')
+                                .trim() || null
                             : null
                           return (
                             <>
                               {userNote && <p className="text-xs text-gray-400">메모: {userNote}</p>}
+                              {returnInfo && <p className="text-xs text-purple-500">반품: {returnInfo}</p>}
                               {lotInfo && <p className="text-xs text-gray-400">{lotInfo}</p>}
                             </>
                           )
