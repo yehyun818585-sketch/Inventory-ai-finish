@@ -35,13 +35,14 @@ function normalizeForMatch(s: string): string {
 }
 
 // 이메일 제목으로 찾은 문서와, 실제 첨부파일 내용이 정말 그 문서 얘기가 맞는지 확인.
-// 발주번호가 명시돼 있으면 그것부터 확인(다르면 바로 실패). 없으면 품목명과 수량을
-// 각각 따로 보지 않고 "같은 품목의 이름과 수량이 함께" 나오는지로 본다 — 둘 중 하나만
-// 우연히 일치하는 건 그 문서라는 근거로 보기엔 약하기 때문.
+// 1) 발주번호가 명시돼 있으면 그것부터 확인(다르면 바로 실패).
+// 2) 없으면 품목코드(우리가 발주 메일에 이미 알려준 값이라 신뢰도가 높음)+수량이 함께 나오는지 확인.
+// 3) 그것도 없으면 품목명+수량이 함께 나오는지로 본다.
+// 식별자·수량 중 하나만 우연히 일치하는 건 그 문서라는 근거로 보기엔 약하기 때문에 항상 함께 확인한다.
 function verifyAttachmentContent(
   text: string,
   expectedOrderNumber: string,
-  items: { product_name: string; quantity: number }[]
+  items: { product_name: string; product_code: string; quantity: number }[]
 ): { verified: boolean; reason: string | null } {
   const poMatch = text.match(/PO-\d{6}-\d{2}/)
   if (poMatch) {
@@ -51,14 +52,15 @@ function verifyAttachmentContent(
 
   const normalizedText = normalizeForMatch(text)
   const matched = items.some(i => {
-    if (!i.product_name) return false
-    const nameFound = normalizedText.includes(normalizeForMatch(i.product_name))
     const qtyFound = normalizedText.includes(String(i.quantity))
-    return nameFound && qtyFound
+    if (!qtyFound) return false
+    const codeFound = !!i.product_code && normalizedText.includes(normalizeForMatch(i.product_code))
+    const nameFound = !!i.product_name && normalizedText.includes(normalizeForMatch(i.product_name))
+    return codeFound || nameFound
   })
   if (matched) return { verified: true, reason: null }
 
-  return { verified: false, reason: '첨부파일에서 발주 내역(품목명+수량)과 일치하는 정보를 찾을 수 없습니다.' }
+  return { verified: false, reason: '첨부파일에서 발주 내역(품목코드/품목명+수량)과 일치하는 정보를 찾을 수 없습니다.' }
 }
 
 interface InboundPayload {
@@ -86,7 +88,7 @@ export async function POST(request: Request) {
     .from('approval_documents')
     .select(`
       id, company_id, status, requested_by_user_id, order_number,
-      approval_document_items ( quantity, products ( product_name ) )
+      approval_document_items ( quantity, products ( product_name, product_code ) )
     `)
     .eq('order_number', order_number)
     .eq('doc_type', '발주품의서')
@@ -109,6 +111,7 @@ export async function POST(request: Request) {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const items = ((doc.approval_document_items || []) as any[]).map(i => ({
           product_name: i.products?.product_name || '',
+          product_code: i.products?.product_code || '',
           quantity: i.quantity
         }))
         const { verified, reason } = verifyAttachmentContent(pdfText, order_number, items)
