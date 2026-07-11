@@ -100,6 +100,8 @@ export default function Home() {
   const [inventorySearch, setInventorySearch] = useState('')
   const [briefing, setBriefing] = useState<AiBriefing | null>(null)
   const [actionAlerts, setActionAlerts] = useState({ overdueCount: 0, evidenceCount: 0, unmatchedCount: 0 })
+  const [monthlyReportConfirmedAt, setMonthlyReportConfirmedAt] = useState<string | null>(null)
+  const [confirmingMonthlyReport, setConfirmingMonthlyReport] = useState(false)
 
   // Command bar
   const [command, setCommand] = useState('')
@@ -170,7 +172,7 @@ export default function Home() {
   // 대시보드 진입 시마다 "조치 필요" 배너용 카운트 계산 (기한초과 미기록/미달 + 증빙 미첨부/불일치)
   async function loadActionAlerts(companyId: string) {
     const [{ data: companyData }, inbound, outbound, transfer, inboundEvidence, outboundEvidence] = await Promise.all([
-      supabase.from('companies').select('reconciliation_grace_days, outbound_grace_days').eq('id', companyId).single(),
+      supabase.from('companies').select('reconciliation_grace_days, outbound_grace_days, monthly_report_confirmed_at').eq('id', companyId).single(),
       getInboundReconciliation(companyId),
       getOutboundReconciliation(companyId),
       getTransferReconciliation(companyId),
@@ -190,6 +192,30 @@ export default function Home() {
     const evidenceCount = inboundEvidence.length + outboundEvidence.exceptions.length
     const unmatchedCount = inbound.unmatched.length + outbound.unmatched.length + transfer.unmatched.length
     setActionAlerts({ overdueCount, evidenceCount, unmatchedCount })
+    setMonthlyReportConfirmedAt(companyData?.monthly_report_confirmed_at ?? null)
+  }
+
+  // 월말(마지막 3일) + 이번 달 미확인 시에만 리포트 확인 배너를 띄운다.
+  // (근거: 회사가 원래 월말 실사 1회에만 의존해 확인 공백이 생겼음 — 반드시 인지시키기 위한 적극적 유도.)
+  function isNearMonthEnd(): boolean {
+    const now = new Date()
+    const lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate()
+    return now.getDate() >= lastDay - 2
+  }
+  function isMonthlyReportConfirmedThisMonth(): boolean {
+    if (!monthlyReportConfirmedAt) return false
+    const c = new Date(monthlyReportConfirmedAt)
+    const now = new Date()
+    return c.getFullYear() === now.getFullYear() && c.getMonth() === now.getMonth()
+  }
+
+  async function confirmMonthlyReport() {
+    if (!profile?.company_id) return
+    setConfirmingMonthlyReport(true)
+    const now = new Date().toISOString()
+    await supabase.from('companies').update({ monthly_report_confirmed_at: now }).eq('id', profile.company_id)
+    setMonthlyReportConfirmedAt(now)
+    setConfirmingMonthlyReport(false)
   }
 
   async function fetchData() {
@@ -397,6 +423,29 @@ export default function Home() {
             )
           })()}
 
+          {/* ── 월말 리포트 확인 배너: 마지막 3일 + 이번 달 미확인일 때만 ── */}
+          {isNearMonthEnd() && !isMonthlyReportConfirmedThisMonth() && (
+            <div className="bg-amber-500 text-white rounded-xl p-4 md:p-5 mb-4 shadow-md">
+              <div className="flex items-center justify-between flex-wrap gap-3">
+                <div className="flex items-center gap-3 flex-wrap">
+                  <span className="text-2xl">📊</span>
+                  <span className="font-bold text-base md:text-lg">월말 AI 리포트 확인 필요</span>
+                  <span className="text-sm md:text-base">폐기 위험 재고·내부사용 반출 등 이번 달 현황을 확인해주세요</span>
+                </div>
+                <div className="flex items-center gap-3 shrink-0">
+                  <Link href="/report" className="text-sm underline">리포트 보기 →</Link>
+                  <button
+                    onClick={confirmMonthlyReport}
+                    disabled={confirmingMonthlyReport}
+                    className="text-sm bg-white text-amber-700 font-medium px-3 py-1.5 rounded-lg hover:bg-amber-50 disabled:opacity-50 transition"
+                  >
+                    확인 완료
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* ── KPI 카드 4개 ── */}
           <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mb-3">
             <div className="bg-white rounded-lg shadow-sm p-2.5 md:p-4 border border-gray-100">
@@ -452,14 +501,14 @@ export default function Home() {
                   <div className="flex items-center gap-2 text-sm">
                     <span className="text-red-500 font-bold">🔴</span>
                     <span className="text-gray-700">
-                      폐기 예상 손실 <span className="font-bold text-red-600">{Math.round(briefing.expiryLoss / 10000).toLocaleString()}만원</span>
+                      폐기 위험 재고 금액 <span className="font-bold text-red-600">{Math.round(briefing.expiryLoss / 10000).toLocaleString()}만원</span>
                       {' '}&mdash; 임박/만료 재고 × 원가
                     </span>
                   </div>
                 ) : (
                   <div className="flex items-center gap-2 text-sm">
                     <span className="text-emerald-500 font-bold">✅</span>
-                    <span className="text-gray-600">폐기 예상 손실 없음</span>
+                    <span className="text-gray-600">폐기 위험 재고 없음</span>
                   </div>
                 )}
                 {briefing.bestChannel && briefing.bestMargin > 0 ? (

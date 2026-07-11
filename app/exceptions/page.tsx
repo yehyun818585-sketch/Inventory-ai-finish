@@ -274,7 +274,7 @@ export default function ExceptionsPage() {
                 🚨 기록 있음 · 증빙 없음 ({unmatched.length}건)
               </h2>
               <p className="text-xs text-gray-400 mt-1">
-                승인문서 없이 처리됐거나 승인수량을 초과한 실물기록 (소량 협찬·샘플 포함)
+                승인문서 없이 처리됐거나 승인수량을 초과한 실물기록 (내부사용 반출은 주간요약으로 별도 관리)
               </p>
             </div>
             <div className="p-3 md:p-6">

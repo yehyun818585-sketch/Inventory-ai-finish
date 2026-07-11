@@ -192,3 +192,107 @@ export async function runReconciliationAlertForCompany(
   console.log(`📧 대사 알림 발송 결과(${companyId}) → 오늘마감:${result.due_today_sent} 1차:${result.stage1_sent} 에스컬레이션:${result.escalation_sent} 미매칭:${result.unmatched_sent}`)
   return result
 }
+
+// ── 내부사용 반출: 건별 사전품의 대신 주간요약 + 월말확인의 이중 점검으로 대체 ──
+// (근거: 회사가 원래 월말 실사 1회에만 의존해 월중 공백이 있었음 → 주간요약으로 검토 주기를 앞당기고,
+//  월말엔 AI 리포트 확인을 직접 유도해 반드시 인지시킨다.)
+
+function isMonday(date: Date): boolean {
+  return date.getDay() === 1
+}
+
+function isNearMonthEnd(date: Date): boolean {
+  const lastDay = new Date(date.getFullYear(), date.getMonth() + 1, 0).getDate()
+  return date.getDate() >= lastDay - 2
+}
+
+// 이번 달에 이미 확인했는지 (연-월 비교)
+function isConfirmedThisMonth(confirmedAt: string | null, now: Date): boolean {
+  if (!confirmedAt) return false
+  const c = new Date(confirmedAt)
+  return c.getFullYear() === now.getFullYear() && c.getMonth() === now.getMonth()
+}
+
+// 매주 월요일: 지난 7일간 내부사용 반출 요약을 전 직원에게 발송 (있을 때만)
+export async function runInternalUseWeeklyDigest(
+  companyId: string,
+  supabase: SupabaseClient,
+  now: Date = new Date()
+): Promise<{ sent: boolean }> {
+  if (!isMonday(now)) return { sent: false }
+
+  const { data: companyData } = await supabase
+    .from('companies').select('name').eq('id', companyId).single()
+  const companyName = companyData?.name || '회사'
+
+  const weekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000).toISOString()
+  const { data: txs } = await supabase
+    .from('transactions')
+    .select('quantity, note, created_at, products(product_name)')
+    .eq('company_id', companyId)
+    .eq('type', '출고')
+    .eq('sub_type', '내부사용')
+    .gte('created_at', weekAgo)
+    .order('created_at', { ascending: false })
+
+  if (!txs || txs.length === 0) return { sent: false }
+
+  const { data: allUsers } = await supabase.from('profiles').select('email').eq('company_id', companyId)
+  if (!allUsers || allUsers.length === 0) return { sent: false }
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const rows = txs.map((t: AnyRowLike, i: number) => {
+    const detailMatch = t.note?.match(/\[내부사용:([^\]]+)\] 수령자: ([^|]+)/)
+    const detail = detailMatch ? `${detailMatch[1]} · ${detailMatch[2].trim()}` : '-'
+    return `
+      <tr style="border-bottom:1px solid #f0f0f0;">
+        <td style="padding:10px 8px;font-weight:500;">${i + 1}. ${t.products?.product_name || ''}</td>
+        <td style="padding:10px 8px;color:#666;">${detail}</td>
+        <td style="padding:10px 8px;text-align:right;font-weight:bold;">${t.quantity.toLocaleString()}개</td>
+      </tr>`
+  }).join('')
+
+  const html = buildEmailHtml(companyName, '의 최근 7일간 내부사용 반출 내역입니다.', [
+    { label: '📦 내부사용 반출 (샘플/협찬/테스트/기타)', color: '#d97706', rows, count: txs.length }
+  ])
+
+  const { error } = await resend.emails.send({
+    from: '재고관리 AI <notify@attude.uk>',
+    to: allUsers.map(u => u.email),
+    subject: `[재고관리 AI] 주간 내부사용 반출 요약 - ${txs.length}건`,
+    html
+  })
+  if (error) { console.error('📧 내부사용 주간요약 발송 실패:', error); return { sent: false } }
+  return { sent: true }
+}
+
+// 월말(마지막 3일): 이번 달 AI 리포트 확인이 아직 안 됐으면 리마인드 발송
+export async function runMonthlyReportReminder(
+  companyId: string,
+  supabase: SupabaseClient,
+  now: Date = new Date()
+): Promise<{ sent: boolean }> {
+  if (!isNearMonthEnd(now)) return { sent: false }
+
+  const { data: companyData } = await supabase
+    .from('companies').select('name, monthly_report_confirmed_at').eq('id', companyId).single()
+  if (!companyData) return { sent: false }
+  if (isConfirmedThisMonth(companyData.monthly_report_confirmed_at, now)) return { sent: false }
+
+  const { data: allUsers } = await supabase.from('profiles').select('email').eq('company_id', companyId)
+  if (!allUsers || allUsers.length === 0) return { sent: false }
+
+  const html = buildEmailHtml(companyData.name || '회사', '의 이번 달 AI 리포트(재고 현황·폐기 위험 등) 확인이 아직 안 됐습니다.', [
+    { label: '📊 월말 AI 리포트 확인 필요', color: '#d97706', rows: `
+      <tr><td style="padding:10px 8px;">대시보드에 접속해 이번 달 리포트를 확인해주세요.</td></tr>`, count: 1 }
+  ])
+
+  const { error } = await resend.emails.send({
+    from: '재고관리 AI <notify@attude.uk>',
+    to: allUsers.map(u => u.email),
+    subject: `[재고관리 AI] 월말 리포트 확인 요청`,
+    html
+  })
+  if (error) { console.error('📧 월말 리포트 리마인드 발송 실패:', error); return { sent: false } }
+  return { sent: true }
+}

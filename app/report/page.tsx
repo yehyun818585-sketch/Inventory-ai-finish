@@ -409,7 +409,7 @@ export default function ReportPage() {
           <div className="grid grid-cols-3 gap-2 mb-3">
             {/* 폐기 예상 손실액 */}
             <div className="bg-white rounded-lg shadow p-2.5 border-l-4 border-red-400">
-              <p className="text-xs font-semibold text-red-500 mb-0.5 leading-tight">폐기 손실</p>
+              <p className="text-xs font-semibold text-red-500 mb-0.5 leading-tight">폐기 위험</p>
               <p className="text-sm font-bold text-gray-900 leading-tight">
                 {kpi.expiryLossAmount > 0
                   ? `${Math.round(kpi.expiryLossAmount / 10000).toLocaleString()}만원`

@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
-import { runReconciliationAlertForCompany } from '@/lib/reconciliationAlert'
+import { runReconciliationAlertForCompany, runInternalUseWeeklyDigest, runMonthlyReportReminder } from '@/lib/reconciliationAlert'
 
 function getSupabaseAdmin() {
   return createClient(
@@ -24,7 +24,9 @@ export async function GET(request: Request) {
   for (const company of companies || []) {
     try {
       const result = await runReconciliationAlertForCompany(company.id, supabase)
-      results.push({ company_id: company.id, ...result })
+      const internalUseDigest = await runInternalUseWeeklyDigest(company.id, supabase)
+      const monthlyReminder = await runMonthlyReportReminder(company.id, supabase)
+      results.push({ company_id: company.id, ...result, internalUseDigest, monthlyReminder })
     } catch (error) {
       console.error(`cron 대사 알림 실패 (company_id=${company.id}):`, error)
       results.push({ company_id: company.id, error: String(error) })

@@ -80,7 +80,9 @@ export default function TransactionsPage() {
     stock_type: '일반',      // 재고 구분: 일반 / 기획용
     lot_unit_cost: '',       // 이번 입고 원가 (기획용일 때 직접 입력, 빈값이면 제품 기본원가)
     return_of_transaction_id: '', // 반품 입고 시: 원 출고 건 참조 (근거 없는 반품 차단)
-    quarantine: false        // 반품 입고 시: 재판매 불가(격리) 처리 여부 — 실물 확인 후 담당자가 최종 판단
+    quarantine: false,       // 반품 입고 시: 재판매 불가(격리) 처리 여부 — 실물 확인 후 담당자가 최종 판단
+    internal_use_reason: '', // 내부사용 세부사유: 샘플/협찬/테스트/기타
+    internal_use_recipient: '' // 내부사용 수령자
   })
   const [returnPhoto, setReturnPhoto] = useState<File | null>(null)
   const [returnSourceOptions, setReturnSourceOptions] = useState<ReturnSourceOption[]>([])
@@ -243,8 +245,16 @@ export default function TransactionsPage() {
 
     // 출고인 경우 사유 필수
     if (formData.type === '출고' && !formData.sub_type) {
-      alert('출고 사유를 선택해주세요. (판매 / 샘플 / 폐기)')
+      alert('출고 사유를 선택해주세요. (판매 / 내부사용 / 폐기)')
       return
+    }
+
+    // 내부사용인 경우 세부사유 + 수령자 필수 (무사유 반출 차단)
+    if (formData.type === '출고' && formData.sub_type === '내부사용') {
+      if (!formData.internal_use_reason || !formData.internal_use_recipient.trim()) {
+        alert('내부사용 세부사유와 수령자를 입력해주세요.')
+        return
+      }
     }
 
     // 반품 입고인 경우 원 출고 건 참조 필수 (근거 없는 반품 입고 차단)
@@ -575,7 +585,10 @@ export default function TransactionsPage() {
         // 재고 차감 성공 후 출고 기록 저장 (로트 정보 포함)
         const outboundResultingQty = await getTotalInventory(formData.product_id, formData.warehouse_id)
         const lotNote = `[로트] ${lotDeductions.join(' / ')}`
-        const finalNote = formData.note ? `${formData.note} | ${lotNote}` : lotNote
+        const internalUseNote = formData.sub_type === '내부사용'
+          ? `[내부사용:${formData.internal_use_reason}] 수령자: ${formData.internal_use_recipient.trim()}`
+          : null
+        const finalNote = [formData.note, internalUseNote, lotNote].filter(Boolean).join(' | ')
         const { error: txError } = await supabase
           .from('transactions')
           .insert([{
@@ -611,7 +624,9 @@ export default function TransactionsPage() {
       stock_type: '일반',
       lot_unit_cost: '',
       return_of_transaction_id: '',
-      quarantine: false
+      quarantine: false,
+      internal_use_reason: '',
+      internal_use_recipient: ''
     })
     setReturnPhoto(null)
     setShowForm(false)
@@ -862,15 +877,49 @@ export default function TransactionsPage() {
                   <select
                     required
                     value={formData.sub_type}
-                    onChange={(e) => setFormData({...formData, sub_type: e.target.value})}
+                    onChange={(e) => setFormData({...formData, sub_type: e.target.value, internal_use_reason: '', internal_use_recipient: ''})}
                     className="w-full border rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-red-500"
                   >
                     <option value="">사유 선택</option>
                     <option value="판매">판매</option>
-                    <option value="샘플">샘플</option>
+                    <option value="내부사용">내부사용</option>
                     <option value="폐기">폐기</option>
                   </select>
                 </div>
+              )}
+              {formData.type === '출고' && formData.sub_type === '내부사용' && (
+                <>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      내부사용 세부사유 *
+                    </label>
+                    <select
+                      required
+                      value={formData.internal_use_reason}
+                      onChange={(e) => setFormData({...formData, internal_use_reason: e.target.value})}
+                      className="w-full border rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-red-500"
+                    >
+                      <option value="">세부사유 선택</option>
+                      <option value="샘플">샘플</option>
+                      <option value="협찬">협찬</option>
+                      <option value="테스트">테스트</option>
+                      <option value="기타">기타</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      수령자 *
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      placeholder="예: 마케팅팀 김민지"
+                      value={formData.internal_use_recipient}
+                      onChange={(e) => setFormData({...formData, internal_use_recipient: e.target.value})}
+                      className="w-full border rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-red-500"
+                    />
+                  </div>
+                </>
               )}
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -1234,18 +1283,23 @@ export default function TransactionsPage() {
                           const lotInfo = lotMatch?.[1] ?? null
                           const returnMatch = tx.note?.match(/\[반품\] (.+?)(?:\s*\|\s*\[로트\]|$)/)
                           const returnInfo = returnMatch?.[1] ?? null
+                          const internalUseMatch = tx.note?.match(/\[내부사용:([^\]]+)\] (.+?)(?:\s*\|\s*\[로트\]|$)/)
+                          const internalUseInfo = internalUseMatch ? `${internalUseMatch[1]} · ${internalUseMatch[2]}` : null
                           const userNote = tx.note
                             ? tx.note
                                 .replace(/\s*\|\s*\[로트\].*$/, '')
                                 .replace(/^\[로트\].*$/, '')
                                 .replace(/\s*\|\s*\[반품\].*$/, '')
                                 .replace(/^\[반품\].*$/, '')
+                                .replace(/\s*\|\s*\[내부사용:[^\]]+\].*$/, '')
+                                .replace(/^\[내부사용:[^\]]+\].*$/, '')
                                 .trim() || null
                             : null
                           return (
                             <>
                               {userNote && <p className="text-xs text-gray-400">메모: {userNote}</p>}
                               {returnInfo && <p className="text-xs text-purple-500">반품: {returnInfo}</p>}
+                              {internalUseInfo && <p className="text-xs text-amber-600">내부사용: {internalUseInfo}</p>}
                               {lotInfo && <p className="text-xs text-gray-400">{lotInfo}</p>}
                             </>
                           )

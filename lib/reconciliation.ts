@@ -88,7 +88,7 @@ async function reconcile(
 
   const { data: txs } = await client
     .from('transactions')
-    .select('id, product_id, warehouse_id, channel, quantity, note, created_at, products(product_name, product_code), warehouses(name)')
+    .select('id, product_id, warehouse_id, channel, quantity, note, sub_type, created_at, products(product_name, product_code), warehouses(name)')
     .eq('company_id', companyId)
     .eq('type', txType)
 
@@ -99,6 +99,9 @@ async function reconcile(
   const txsByKey: Record<string, TxEntry[]> = {}
 
   ;(txs || []).forEach((t: AnyRow) => {
+    // 내부사용 반출은 승인문서(출고지시서)로 커버되는 대상이 아니므로 애초에 대사 페어링에서 제외.
+    // 별도로 주간요약·월말확인 채널에서 관리한다(적발통제를 "기록있음·증빙없음" 알람 대신 그쪽으로 옮김).
+    if (t.sub_type === '내부사용') return
     if (t.product_id && t.products) productNameById[t.product_id] = { product_name: t.products.product_name, product_code: t.products.product_code }
     const { key: locKey, display } = txSecondaryKey(t)
     const key = `${t.product_id}::${locKey}`
