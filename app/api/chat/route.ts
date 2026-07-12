@@ -400,6 +400,20 @@ export async function POST(request: Request) {
   "message": "사용자에게 보여줄 메시지"
 }
 
+### 서로 다른 품목을 한 번에 출고할 때 (예: "쿠션100개+립밤100개 자사몰 출고")
+product_name/quantity 단수 필드 대신 items 배열을 쓸 것. 이 경우 get_inventory tool 호출하지 말고 바로 반환(재고 확인은 프론트가 함).
+{
+  "action": "출고",
+  "items": [ { "product_name": "정확한 전체 제품명", "quantity": 숫자 }, ... ],
+  "warehouse": "창고명 (창고가 여러 개일 때만 필요)",
+  "channel": "채널명 (외부출고시)",
+  "date": "YYYY-MM-DD (날짜 지정시)",
+  "sub_type": "판매" | "내부사용" | "폐기" (필수),
+  "internal_use_reason": "샘플" | "협찬" | "테스트" | "기타" (sub_type이 내부사용일 때 필수),
+  "internal_use_recipient": "수령자 (sub_type이 내부사용일 때 필수)",
+  "message": "사용자에게 보여줄 메시지"
+}
+
 ### 조회/분석 답변 시
 {"action": "답변", "message": "한국어 자연어 답변"}
 
@@ -422,6 +436,8 @@ export async function POST(request: Request) {
 - lot_number는 사용자가 지정하지 않으면 오늘 날짜 기본값 사용 (물어볼 필요 없음)
 
 ## 출고 처리 규칙 (매우 중요)
+- ★ 서로 다른 품목이 2개 이상 언급되면(예: "쿠션100+립밤100") → get_inventory 호출하지 말고 위 "서로 다른 품목을 한 번에 출고할 때" 형식(items 배열)으로 바로 반환. 품목 하나만 처리하고 나머지를 누락하는 것 절대 금지.
+- 품목이 1개일 때만 아래 단일 품목 흐름을 따름:
 - 출고 요청 시 → get_inventory tool 1회만 호출 (product_name에 사용자가 말한 키워드 그대로 전달)
   예) "핸드로션 30개 출고" → product_name:"핸드로션" / "세럼 200개 출고" → product_name:"세럼"
 - get_inventory 결과에서 창고별 수량 합산 → warehouse는 수량이 가장 많은 창고 사용

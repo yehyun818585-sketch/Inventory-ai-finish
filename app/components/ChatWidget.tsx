@@ -109,6 +109,17 @@ export default function ChatWidget() {
   const [pendingAction, setPendingAction] = useState<Message['data'] | null>(null)
   const [chatBottom, setChatBottom] = useState(96)
 
+  interface MultiOutboundPending {
+    items: { product: Product; quantity: number }[]
+    warehouse: Warehouse
+    channel: string | null
+    sub_type: string
+    internal_use_reason?: string
+    internal_use_recipient?: string
+    date?: string
+  }
+  const [pendingMultiAction, setPendingMultiAction] = useState<MultiOutboundPending | null>(null)
+
   useEffect(() => {
     const vv = window.visualViewport
     if (!vv) return
@@ -347,6 +358,216 @@ export default function ChatWidget() {
     }
   }
 
+  // 한 메시지에 서로 다른 품목이 여러 개면(예: "쿠션100+립밤100 출고") 단일 품목 흐름과 별도로 처리.
+  // 기존 단일 품목 로직은 건드리지 않고, 병행하는 새 경로로 둔다 — 아직 검증 안 된 다품목 로직이
+  // 이미 잘 동작하는 단일 품목 흐름에 영향을 줄 여지를 원천 차단하기 위함.
+  // 모호하거나 못 찾은 품목이 하나라도 있으면 전체를 보류하고 다시 말해달라고 요청한다(부분 실행 금지).
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  async function resolveMultiOutbound(data: any) {
+    if (profile?.role !== '창고') {
+      setMessages(prev => [...prev, { role: 'assistant', content: '입출고 기록은 창고 담당자만 등록할 수 있습니다.' }])
+      return
+    }
+    if (!data.sub_type) {
+      setMessages(prev => [...prev, { role: 'assistant', content: '출고 사유가 필요합니다. 판매 / 내부사용 / 폐기 중 어느 쪽인가요?' }])
+      return
+    }
+    if (data.sub_type === '내부사용' && (!data.internal_use_reason || !data.internal_use_recipient)) {
+      setMessages(prev => [...prev, { role: 'assistant', content: '내부사용 세부사유(샘플/협찬/테스트/기타)와 수령자를 알려주세요.' }])
+      return
+    }
+
+    let channel: string | null = null
+    if (data.channel) {
+      const { name, unmatched } = resolveRegisteredChannel(data.channel, channels)
+      if (unmatched) {
+        const channelNames = channels.map(c => c.name).join(', ')
+        setMessages(prev => [...prev, {
+          role: 'assistant',
+          content: `"${data.channel}" 채널을 찾을 수 없습니다. 등록된 채널 중 어디인가요? (${channelNames})`
+        }])
+        return
+      }
+      channel = name
+    }
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const items: { product_name: string; quantity: number }[] = data.items || []
+    const resolvedItems: { product: Product; quantity: number }[] = []
+    for (const it of items) {
+      const matches = products.filter(p =>
+        p.product_name.includes(it.product_name) || p.product_code.includes(it.product_name)
+      )
+      if (matches.length === 0) {
+        setMessages(prev => [...prev, { role: 'assistant', content: `"${it.product_name}" 제품을 찾을 수 없습니다. 전체 요청을 다시 말씀해주세요.` }])
+        return
+      }
+      if (matches.length > 1) {
+        setMessages(prev => [...prev, { role: 'assistant', content: `"${it.product_name}"에 해당하는 제품이 여러 개입니다. 정확한 제품명으로 다시 말씀해주세요.` }])
+        return
+      }
+      resolvedItems.push({ product: matches[0], quantity: it.quantity })
+    }
+
+    let warehouse: Warehouse | undefined
+    if (warehouses.length === 1) {
+      warehouse = warehouses[0]
+    } else if (data.warehouse) {
+      warehouse = warehouses.find(w => w.name.includes(data.warehouse))
+    }
+    if (!warehouse) {
+      setMessages(prev => [...prev, {
+        role: 'assistant',
+        content: `어느 창고인가요?\n${warehouses.map((w, i) => `${i + 1}. ${w.name}`).join('\n')}`
+      }])
+      return
+    }
+
+    // 재고 확인(임박/만료 제외) — 품목 하나라도 부족하면 전체 취소, 부분 실행 안 함
+    const shortages: string[] = []
+    for (const { product, quantity } of resolvedItems) {
+      const { data: lots } = await supabase
+        .from('inventory')
+        .select('quantity, lot_number')
+        .eq('product_id', product.id)
+        .eq('warehouse_id', warehouse.id)
+        .eq('stock_type', '일반')
+        .gt('quantity', 0)
+
+      const shelfLifeMonths = product.shelf_life_months || companyShelfLife
+      const today = new Date()
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const isExpiredOrWarning = (lot: any): boolean => {
+        if (!lot.lot_number || !/^\d{6}-\d{2}$/.test(lot.lot_number)) return false
+        const y = parseInt('20' + lot.lot_number.substring(0, 2))
+        const m = parseInt(lot.lot_number.substring(2, 4)) - 1
+        const d = parseInt(lot.lot_number.substring(4, 6))
+        const expiry = new Date(y, m, d)
+        expiry.setMonth(expiry.getMonth() + shelfLifeMonths)
+        const days = Math.ceil((expiry.getTime() - today.getTime()) / (1000 * 60 * 60 * 24))
+        return days <= shelfLifeMonths * 30 * companyWarningRatio
+      }
+      const available = (lots || []).filter((l: any) => !isExpiredOrWarning(l)).reduce((s: number, l: any) => s + l.quantity, 0)
+      if (available < quantity) {
+        shortages.push(`${product.product_name}: 필요 ${quantity.toLocaleString()}개, 가용 ${available.toLocaleString()}개`)
+      }
+    }
+    if (shortages.length > 0) {
+      setMessages(prev => [...prev, {
+        role: 'assistant',
+        content: `⚠️ 출고 취소 — 모든 품목이 충족돼야 진행됩니다.\n재고 부족:\n${shortages.map(s => `- ${s}`).join('\n')}`
+      }])
+      return
+    }
+
+    const reasonLabel = data.sub_type === '내부사용'
+      ? ` (내부사용: ${data.internal_use_reason}, 수령자 ${data.internal_use_recipient})`
+      : ` (${data.sub_type})`
+    const summary = `다음 품목을 ${warehouse.name}에서 출고합니다${channel ? ` → ${channel}` : ''}${reasonLabel}:\n` +
+      resolvedItems.map(i => `- ${i.product.product_name} ${i.quantity.toLocaleString()}개`).join('\n')
+
+    setPendingMultiAction({
+      items: resolvedItems,
+      warehouse,
+      channel,
+      sub_type: data.sub_type,
+      internal_use_reason: data.internal_use_reason,
+      internal_use_recipient: data.internal_use_recipient,
+      date: data.date
+    })
+    setMessages(prev => [...prev, { role: 'assistant', content: summary }])
+  }
+
+  async function runConfirmMultiOutbound(pending: MultiOutboundPending) {
+    const transactionDate = pending.date
+      ? (pending.date === getTodayISO()
+          ? new Date().toISOString()
+          : new Date(pending.date + 'T09:00:00').toISOString())
+      : new Date().toISOString()
+
+    const noteText = pending.sub_type === '내부사용'
+      ? `[내부사용:${pending.internal_use_reason}] 수령자: ${pending.internal_use_recipient} | AI 채팅으로 등록`
+      : pending.channel
+      ? `[${pending.channel}] AI 채팅으로 등록`
+      : 'AI 채팅으로 등록'
+
+    const shelfLifeMonths = companyShelfLife
+    const today = new Date()
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const isExpiredOrWarning = (lot: any, slm: number): boolean => {
+      if (!lot.lot_number || !/^\d{6}-\d{2}$/.test(lot.lot_number)) return false
+      const y = parseInt('20' + lot.lot_number.substring(0, 2))
+      const m = parseInt(lot.lot_number.substring(2, 4)) - 1
+      const d = parseInt(lot.lot_number.substring(4, 6))
+      const expiry = new Date(y, m, d)
+      expiry.setMonth(expiry.getMonth() + slm)
+      const days = Math.ceil((expiry.getTime() - today.getTime()) / (1000 * 60 * 60 * 24))
+      return days <= slm * 30 * companyWarningRatio
+    }
+
+    const deductionSummaries: string[] = []
+
+    for (const { product, quantity } of pending.items) {
+      const { data: inventoryLots } = await supabase
+        .from('inventory')
+        .select('id, quantity, lot_number')
+        .eq('product_id', product.id)
+        .eq('warehouse_id', pending.warehouse.id)
+        .eq('stock_type', '일반')
+        .gt('quantity', 0)
+
+      const slm = product.shelf_life_months || shelfLifeMonths
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const eligible = (inventoryLots || [])
+        .filter((lot: any) => !isExpiredOrWarning(lot, slm))
+        .sort((a: any, b: any) => (a.lot_number && b.lot_number) ? a.lot_number.localeCompare(b.lot_number) : 0)
+
+      let remaining = quantity
+      const lotDeductions: string[] = []
+      for (const lot of eligible) {
+        if (remaining <= 0) break
+        const deduct = Math.min(lot.quantity, remaining)
+        const newQty = lot.quantity - deduct
+        lotDeductions.push(`${lot.lot_number || '미지정'}:-${deduct}`)
+        if (newQty <= 0) {
+          await supabase.from('inventory').delete().eq('id', lot.id)
+        } else {
+          await supabase.from('inventory').update({ quantity: newQty, updated_at: new Date().toISOString() }).eq('id', lot.id)
+        }
+        remaining -= deduct
+      }
+
+      const { error: txError } = await supabase.from('transactions').insert([{
+        product_id: product.id,
+        warehouse_id: pending.warehouse.id,
+        type: '출고',
+        sub_type: pending.sub_type,
+        quantity,
+        channel: pending.channel,
+        note: `${noteText} | ${lotDeductions.join(', ')}`,
+        recorded_by: profile?.name || 'AI',
+        created_at: transactionDate,
+        company_id: profile?.company_id
+      }])
+      if (txError) {
+        console.error('❌ 트랜잭션 저장 실패:', txError.message)
+      }
+
+      deductionSummaries.push(`${product.product_name} ${quantity.toLocaleString()}개 (${lotDeductions.join(', ')})`)
+    }
+
+    setMessages(prev => {
+      const next: Message[] = [...prev, {
+        role: 'assistant',
+        content: `출고 완료!\n\n차감 내역:\n${deductionSummaries.map(d => `- ${d}`).join('\n')}`
+      }]
+      try { sessionStorage.setItem(CHAT_MESSAGES_STORAGE_KEY, JSON.stringify(next)) } catch { /* quota 등 */ }
+      return next
+    })
+    setPendingMultiAction(null)
+    window.location.reload()
+  }
+
   // GPT 응답 후 제품 매칭 → 창고 선택
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   async function resolveAction(data: any) {
@@ -505,7 +726,9 @@ export default function ChatWidget() {
         return
       }
 
-      if (data.action === '입고' || data.action === '출고' || data.action === '창고이동') {
+      if (data.action === '출고' && Array.isArray(data.items) && data.items.length > 0) {
+        await resolveMultiOutbound(data)
+      } else if (data.action === '입고' || data.action === '출고' || data.action === '창고이동') {
         await resolveAction(data)
       } else if (data.action === '질문' || data.action === '답변') {
         setMessages(prev => [...prev, { role: 'assistant', content: data.message }])
@@ -909,7 +1132,11 @@ export default function ChatWidget() {
   }
 
   async function handleConfirm() {
-    if (pendingAction) {
+    if (pendingMultiAction) {
+      setLoading(true)
+      await runConfirmMultiOutbound(pendingMultiAction)
+      setLoading(false)
+    } else if (pendingAction) {
       await confirmActionWith(pendingAction)
     }
   }
@@ -917,6 +1144,7 @@ export default function ChatWidget() {
   function cancelAction() {
     setPendingAction(null)
     setPendingPartial(null)
+    setPendingMultiAction(null)
     setMessages(prev => [...prev, { role: 'assistant', content: '취소되었습니다.' }])
     setTimeout(() => inputRef.current?.focus(), 100)
   }
@@ -973,7 +1201,7 @@ export default function ChatWidget() {
             )}
 
             {/* 재고 변경 확인 버튼 */}
-            {pendingAction && !loading && (
+            {(pendingAction || pendingMultiAction) && !loading && (
               <div className="flex gap-2 pt-1">
                 <button
                   onClick={handleConfirm}
@@ -995,7 +1223,7 @@ export default function ChatWidget() {
 
           {/* 입력 영역 */}
           <form ref={formRef} onSubmit={handleSubmit} className="p-3 border-t flex flex-col gap-1.5 shrink-0">
-            {pendingAction && (
+            {(pendingAction || pendingMultiAction) && (
               <p className="text-xs text-center text-orange-500">위에서 확인 또는 취소를 눌러주세요</p>
             )}
             <div className="flex gap-2">
@@ -1006,11 +1234,11 @@ export default function ChatWidget() {
                 onChange={(e) => setInput(e.target.value)}
                 placeholder="입고/출고/이동 요청 입력..."
                 className="flex-1 border rounded-lg px-3 py-2 text-base focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-50 disabled:text-gray-400"
-                disabled={loading || !!pendingAction}
+                disabled={loading || !!(pendingAction || pendingMultiAction)}
               />
               <button
                 type="submit"
-                disabled={loading || !input.trim() || !!pendingAction}
+                disabled={loading || !input.trim() || !!(pendingAction || pendingMultiAction)}
                 className="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50"
               >
                 전송
