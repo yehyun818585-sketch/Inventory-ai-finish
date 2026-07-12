@@ -394,6 +394,9 @@ export async function POST(request: Request) {
   "channel": "채널명 (외부출고시)",
   "date": "YYYY-MM-DD (날짜 지정시)",
   "lot_number": "YYMMDD-01 (입고시 필수)",
+  "sub_type": "판매" | "내부사용" | "폐기" (출고 시 필수),
+  "internal_use_reason": "샘플" | "협찬" | "테스트" | "기타" (sub_type이 내부사용일 때 필수),
+  "internal_use_recipient": "수령자 (sub_type이 내부사용일 때 필수)",
   "message": "사용자에게 보여줄 메시지"
 }
 
@@ -430,8 +433,17 @@ export async function POST(request: Request) {
   예) "올영 출고" → channel:"올리브영" (목록에 "올리브영"이 있을 때)
 - 사용자가 말한 채널이 등록된 목록 중 **어디에도 뚜렷하게 대응되지 않으면** → action:"질문"으로 "등록된 채널 중 어디인가요? (${channelNames})" 안내 (임의로 비슷한 값 만들어내지 말 것)
 - 사용자가 "~창고로 이동", "~로 보내" 등 이동 표현 사용 → action:"창고이동", to_warehouse 설정
-- 채널도 to_warehouse도 없으면 → action:"질문"으로 "외부 채널 출고인가요(${channelNames}), 창고 간 이동인가요?" 안내
+- 채널도 to_warehouse도 없으면 → action:"질문"으로 "외부 채널 출고인가요(${channelNames}), 내부사용(사내 반출)인가요, 창고 간 이동인가요?" 안내
 - 등록된 채널 목록에 없는 임의 채널값 절대 금지
+
+## 출고 사유 규칙 (매우 중요 — 무사유 반출 차단)
+- action:"출고"는 반드시 sub_type("판매"|"내부사용"|"폐기")을 포함해야 함. sub_type 없이 action:"출고" 절대 반환 금지
+- channel이 있으면 → sub_type:"판매" (별도로 물어볼 필요 없음)
+- 사용자가 "폐기", "버림", "불량 처리" 등을 언급 → sub_type:"폐기"
+- 사용자가 "내부사용", "사내", "사무실로", "직원 지급", "협찬", "테스트용", "샘플로 나감" 등 판매 목적이 아닌 반출을 언급 → sub_type:"내부사용"
+  - 이때는 internal_use_reason("샘플"|"협찬"|"테스트"|"기타")과 internal_use_recipient(수령자)이 둘 다 있어야 action:"출고" 반환 가능
+  - 세부사유나 수령자 둘 중 하나라도 없으면 → action:"질문"으로 "내부사용 세부사유(샘플/협찬/테스트/기타)와 수령자를 알려주세요" 안내
+- 채널도 내부사용 표현도 폐기 표현도 없으면 → action:"질문"으로 "판매(어느 채널인가요?), 내부사용(사내 반출), 폐기 중 어느 사유인가요?" 안내
 
 ## 제품/창고 선택 규칙 (매우 중요)
 - 입출고/이동 action을 반환할 때 절대로 제품 선택 질문하지 말 것

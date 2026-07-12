@@ -786,6 +786,8 @@ export default function TransactionsPage() {
     )
   }
 
+  const isWarehouse = profile?.role === '창고'
+
   return (
     <>
       <Navbar />
@@ -794,6 +796,7 @@ export default function TransactionsPage() {
         {/* 헤더 */}
         <div className="flex flex-wrap justify-between items-start gap-3 mb-6">
           <h1 className="text-xl font-bold text-gray-900">입출고 관리</h1>
+          {isWarehouse && (
           <button
             onClick={() => {
               if (!showForm) {
@@ -808,10 +811,11 @@ export default function TransactionsPage() {
           >
             {showForm ? '취소' : '+ 입출고 등록'}
           </button>
+          )}
         </div>
 
         {/* 입출고 등록 폼 */}
-        {showForm && (
+        {isWarehouse && showForm && (
           <div className="bg-white rounded-lg shadow p-6 mb-8">
             <h2 className="text-xl font-semibold mb-4">입출고 등록</h2>
             <form onSubmit={handleSubmit} className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -1275,13 +1279,15 @@ export default function TransactionsPage() {
                           {new Date(tx.created_at).toLocaleDateString('ko-KR')}
                         </p>
                       </div>
-                      <button
-                        onClick={() => handleDelete(tx)}
-                        className="text-gray-400 hover:text-red-600 p-2 rounded-lg hover:bg-red-50 transition"
-                        title="삭제"
-                      >
-                        🗑️
-                      </button>
+                      {isWarehouse && (
+                        <button
+                          onClick={() => handleDelete(tx)}
+                          className="text-gray-400 hover:text-red-600 p-2 rounded-lg hover:bg-red-50 transition"
+                          title="삭제"
+                        >
+                          🗑️
+                        </button>
+                      )}
                     </div>
                   </div>
                   )

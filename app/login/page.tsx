@@ -12,7 +12,7 @@ export default function LoginPage() {
   const [name, setName] = useState('')
   const [companyName, setCompanyName] = useState('')
   const [role, setRole] = useState<'본사' | '창고'>('창고')
-  const [position, setPosition] = useState<'관리팀원' | '관리책임자' | '대표'>('관리팀원')
+  const [position, setPosition] = useState<'관리팀원' | '관리책임자' | '대표' | '담당자'>('담당자')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
 
@@ -160,7 +160,7 @@ export default function LoginPage() {
                       name="role"
                       value="본사"
                       checked={role === '본사'}
-                      onChange={() => setRole('본사')}
+                      onChange={() => { setRole('본사'); setPosition('관리팀원') }}
                       className="text-blue-600"
                     />
                     <span>본사</span>
@@ -171,7 +171,7 @@ export default function LoginPage() {
                       name="role"
                       value="창고"
                       checked={role === '창고'}
-                      onChange={() => setRole('창고')}
+                      onChange={() => { setRole('창고'); setPosition('담당자') }}
                       className="text-blue-600"
                     />
                     <span>창고</span>
@@ -182,21 +182,30 @@ export default function LoginPage() {
                 <label className="block text-sm font-medium text-gray-700 mb-1">
                   직급 <span className="text-gray-400 font-normal">(결재 승인 권한 판단에 사용)</span>
                 </label>
-                <div className="flex gap-4 flex-wrap">
-                  {(['관리팀원', '관리책임자', '대표'] as const).map(p => (
-                    <label key={p} className="flex items-center gap-2 cursor-pointer">
-                      <input
-                        type="radio"
-                        name="position"
-                        value={p}
-                        checked={position === p}
-                        onChange={() => setPosition(p)}
-                        className="text-blue-600"
-                      />
-                      <span>{p}</span>
+                {role === '창고' ? (
+                  <div className="flex gap-4">
+                    <label className="flex items-center gap-2 opacity-70">
+                      <input type="radio" checked readOnly className="text-blue-600" />
+                      <span>담당자</span>
                     </label>
-                  ))}
-                </div>
+                  </div>
+                ) : (
+                  <div className="flex gap-4 flex-wrap">
+                    {(['관리팀원', '관리책임자', '대표'] as const).map(p => (
+                      <label key={p} className="flex items-center gap-2 cursor-pointer">
+                        <input
+                          type="radio"
+                          name="position"
+                          value={p}
+                          checked={position === p}
+                          onChange={() => setPosition(p)}
+                          className="text-blue-600"
+                        />
+                        <span>{p}</span>
+                      </label>
+                    ))}
+                  </div>
+                )}
                 <p className="text-xs text-gray-400 mt-1">관리책임자/대표만 결재 승인이 가능합니다.</p>
               </div>
             </>

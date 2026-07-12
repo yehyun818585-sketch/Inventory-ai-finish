@@ -46,6 +46,9 @@ interface Message {
     date?: string  // YYYY-MM-DD 형식
     lot_number?: string  // 입고 시 로트번호 (YYMMDD-01)
     note?: string
+    sub_type?: string  // 출고 사유: 판매/내부사용/폐기 (출고 시 필수)
+    internal_use_reason?: string  // 내부사용 세부사유: 샘플/협찬/테스트/기타
+    internal_use_recipient?: string  // 내부사용 수령자
   }
 }
 
@@ -277,7 +280,10 @@ export default function ChatWidget() {
       summary = `${confirmed.product_name} ${(confirmed.quantity||0).toLocaleString()}개를 ${confirmed.warehouse}로 입고합니다.\n로트: ${lot}`
     } else if (confirmed.action === '출고') {
       const dest = confirmed.channel ? ` → ${confirmed.channel}` : ''
-      summary = `${confirmed.product_name} ${(confirmed.quantity||0).toLocaleString()}개를 ${confirmed.warehouse}에서 출고합니다${dest}.`
+      const reasonLabel = confirmed.sub_type === '내부사용'
+        ? ` (내부사용: ${confirmed.internal_use_reason}, 수령자 ${confirmed.internal_use_recipient})`
+        : confirmed.sub_type ? ` (${confirmed.sub_type})` : ''
+      summary = `${confirmed.product_name} ${(confirmed.quantity||0).toLocaleString()}개를 ${confirmed.warehouse}에서 출고합니다${dest}${reasonLabel}.`
     } else if (confirmed.action === '창고이동') {
       summary = `${confirmed.product_name} ${(confirmed.quantity||0).toLocaleString()}개를 ${confirmed.warehouse} → ${confirmed.to_warehouse}로 이동합니다.`
     }
@@ -344,6 +350,32 @@ export default function ChatWidget() {
   // GPT 응답 후 제품 매칭 → 창고 선택
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   async function resolveAction(data: any) {
+    // 입출고 기록은 창고담당자만 — 화면(폼)에만 있던 제한을 챗봇에서도 우회 못 하게 동일 적용
+    // (DB에도 같은 제한이 RLS로 걸려있어 이중 방어. 여기서 먼저 막는 건 사용자에게 이유를 알려주기 위함)
+    if ((data.action === '입고' || data.action === '출고' || data.action === '창고이동') && profile?.role !== '창고') {
+      setMessages(prev => [...prev, {
+        role: 'assistant',
+        content: '입출고 기록은 창고 담당자만 등록할 수 있습니다.'
+      }])
+      return
+    }
+    // 출고는 반드시 사유(판매/내부사용/폐기)가 있어야 함 — 무사유 반출 차단
+    if (data.action === '출고') {
+      if (!data.sub_type) {
+        setMessages(prev => [...prev, {
+          role: 'assistant',
+          content: '출고 사유가 필요합니다. 판매 / 내부사용 / 폐기 중 어느 쪽인가요?'
+        }])
+        return
+      }
+      if (data.sub_type === '내부사용' && (!data.internal_use_reason || !data.internal_use_recipient)) {
+        setMessages(prev => [...prev, {
+          role: 'assistant',
+          content: '내부사용 세부사유(샘플/협찬/테스트/기타)와 수령자를 알려주세요.'
+        }])
+        return
+      }
+    }
     if (data.channel) {
       const { name, unmatched } = resolveRegisteredChannel(data.channel, channels)
       if (unmatched) {
@@ -554,8 +586,10 @@ export default function ChatWidget() {
         return
       }
 
-      // 비고 메모 생성
-      const noteText = pendingAction.channel
+      // 비고 메모 생성 (내부사용은 수동 입고 폼과 동일한 패턴으로 인코딩 — 예외리스트 제외 로직은 sub_type만 보지만, 표시는 note로)
+      const noteText = pendingAction.sub_type === '내부사용'
+        ? `[내부사용:${pendingAction.internal_use_reason}] 수령자: ${pendingAction.internal_use_recipient} | AI 채팅으로 등록`
+        : pendingAction.channel
         ? `[${pendingAction.channel}] AI 채팅으로 등록`
         : 'AI 채팅으로 등록'
 
@@ -727,6 +761,7 @@ export default function ChatWidget() {
           product_id: product.id,
           warehouse_id: warehouse.id,
           type: pendingAction.action,
+          sub_type: pendingAction.action === '출고' ? (pendingAction.sub_type || null) : null,
           quantity: pendingAction.quantity,
           channel: pendingAction.channel || null,
           note: noteText,

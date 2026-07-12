@@ -64,6 +64,15 @@ export default function ExceptionsPage() {
   const [attaching, setAttaching] = useState(false)
   const [signedUrls, setSignedUrls] = useState<Record<string, string>>({})
 
+  // 출고 건 일괄 증빙 첨부 — 한 번의 집화(운송)로 여러 품목이 같이 나가면 증빙 파일도 하나뿐인데,
+  // 건별로 따로 첨부해야 했던 문제를 해결. 선택된 각 건은 자기 실물기록 수량을 그대로 증빙수량으로 씀
+  // (수량을 다시 입력받게 하면 오타 등으로 실물기록과 어긋날 여지가 생겨, 그 여지 자체를 없앤 설계).
+  const [selectedOutboundIds, setSelectedOutboundIds] = useState<Set<string>>(new Set())
+  const [showBatchAttach, setShowBatchAttach] = useState(false)
+  const [batchFile, setBatchFile] = useState<File | null>(null)
+  const [batchShippingType, setBatchShippingType] = useState<typeof SHIPPING_TYPES[number] | ''>('')
+  const [batchAttaching, setBatchAttaching] = useState(false)
+
   useEffect(() => {
     if (!profile?.company_id) return
     load(profile.company_id)
@@ -190,6 +199,73 @@ export default function ExceptionsPage() {
     }
   }
 
+  function toggleSelectOutbound(transactionId: string) {
+    setSelectedOutboundIds(prev => {
+      const next = new Set(prev)
+      if (next.has(transactionId)) next.delete(transactionId)
+      else next.add(transactionId)
+      return next
+    })
+  }
+
+  async function handleBatchAttachSubmit() {
+    if (!profile?.company_id || selectedOutboundIds.size === 0) return
+    const ids = Array.from(selectedOutboundIds)
+
+    // 비운송(자차배송/직접픽업) 일괄 신고: 파일 없이 배송유형만 전 건에 저장
+    if (batchShippingType === '자차배송' || batchShippingType === '직접픽업') {
+      setBatchAttaching(true)
+      const { error } = await supabase.from('transactions')
+        .update({ shipping_type: batchShippingType })
+        .in('id', ids)
+      setBatchAttaching(false)
+      if (error) { alert('저장 실패: ' + error.message); return }
+      setShowBatchAttach(false)
+      setSelectedOutboundIds(new Set())
+      load(profile.company_id)
+      return
+    }
+
+    if (!batchFile) {
+      alert('운송장 파일을 첨부해주세요.')
+      return
+    }
+
+    setBatchAttaching(true)
+    try {
+      const ext = batchFile.name.split('.').pop() || 'bin'
+      const path = `${profile.company_id}/batch-${Date.now()}.${ext}`
+      const { error: uploadError } = await supabase.storage.from('evidence').upload(path, batchFile)
+      if (uploadError) {
+        alert('파일 업로드 실패: ' + uploadError.message)
+        return
+      }
+
+      // 선택된 건 각각, 자기 실물기록 수량 그대로를 증빙수량으로 저장 (같은 집화 건이므로 파일만 공유)
+      const targets = evidenceExceptions.filter(e => selectedOutboundIds.has(e.transaction_id))
+      const results = await Promise.all(targets.map(t =>
+        supabase.from('transactions').update({
+          evidence_file_url: path,
+          evidence_quantity: t.quantity,
+          shipping_type: '택배/화물'
+        }).eq('id', t.transaction_id)
+      ))
+      const failed = results.find(r => r.error)
+      if (failed?.error) {
+        alert('일부 저장 실패: ' + failed.error.message)
+        return
+      }
+
+      setShowBatchAttach(false)
+      setBatchFile(null)
+      setBatchShippingType('')
+      setSelectedOutboundIds(new Set())
+      load(profile.company_id)
+    } finally {
+      setBatchAttaching(false)
+    }
+  }
+
   async function viewEvidence(transactionId: string, path: string) {
     if (signedUrls[transactionId]) {
       window.open(signedUrls[transactionId], '_blank')
@@ -310,6 +386,56 @@ export default function ExceptionsPage() {
               </p>
             </div>
             <div className="p-3 md:p-6">
+              {selectedOutboundIds.size > 0 && (
+                <div className="mb-3 flex items-center justify-between bg-purple-50 border border-purple-200 rounded-lg px-3 py-2">
+                  <span className="text-sm text-purple-700">출고 {selectedOutboundIds.size}건 선택됨 — 같은 운송장(집화) 한 번에 나간 여러 품목이면 파일 하나로 일괄 첨부하세요.</span>
+                  <div className="flex items-center gap-2">
+                    <button onClick={() => setSelectedOutboundIds(new Set())} className="text-xs text-gray-500 hover:underline">선택 해제</button>
+                    <button
+                      onClick={() => setShowBatchAttach(!showBatchAttach)}
+                      className="text-xs bg-purple-600 text-white px-2.5 py-1.5 rounded-lg hover:bg-purple-700 transition"
+                    >
+                      {showBatchAttach ? '취소' : '일괄 증빙 첨부'}
+                    </button>
+                  </div>
+                </div>
+              )}
+              {showBatchAttach && selectedOutboundIds.size > 0 && (
+                <div className="mb-3 bg-gray-50 rounded-lg p-3 flex flex-wrap items-end gap-3">
+                  <div>
+                    <label className="block text-xs text-gray-500 mb-1">배송유형</label>
+                    <select
+                      value={batchShippingType}
+                      onChange={(ev) => setBatchShippingType(ev.target.value as typeof SHIPPING_TYPES[number])}
+                      className="border rounded-lg px-2 py-1.5 text-sm"
+                    >
+                      <option value="">선택</option>
+                      {SHIPPING_TYPES.map(st => (
+                        <option key={st} value={st}>{st}</option>
+                      ))}
+                    </select>
+                  </div>
+                  {(batchShippingType === '택배/화물' || batchShippingType === '') && (
+                    <div>
+                      <label className="block text-xs text-gray-500 mb-1">운송장 파일 (선택 {selectedOutboundIds.size}건 공통)</label>
+                      <input
+                        type="file"
+                        accept="image/*,application/pdf"
+                        onChange={(ev) => setBatchFile(ev.target.files?.[0] || null)}
+                        className="text-sm"
+                      />
+                    </div>
+                  )}
+                  <p className="text-xs text-gray-400 basis-full">각 건의 증빙수량은 실물 출고수량과 동일하게 자동 저장됩니다.</p>
+                  <button
+                    onClick={handleBatchAttachSubmit}
+                    disabled={batchAttaching}
+                    className="bg-green-600 text-white px-3 py-1.5 text-sm rounded-lg hover:bg-green-700 disabled:opacity-50 transition"
+                  >
+                    {batchAttaching ? '저장 중...' : '저장'}
+                  </button>
+                </div>
+              )}
               {evidenceExceptions.length === 0 ? (
                 <p className="text-gray-500 text-center py-6">해당 사항 없습니다.</p>
               ) : (
@@ -317,7 +443,15 @@ export default function ExceptionsPage() {
                   {evidenceExceptions.map((e) => (
                     <div key={e.transaction_id} className="border-b py-2">
                       <div className="flex items-center justify-between flex-wrap gap-2">
-                        <div>
+                        <div className="flex items-center gap-2">
+                          {e.source === '출고' && (
+                            <input
+                              type="checkbox"
+                              checked={selectedOutboundIds.has(e.transaction_id)}
+                              onChange={() => toggleSelectOutbound(e.transaction_id)}
+                              className="shrink-0"
+                            />
+                          )}
                           <span className="px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-800 mr-2">{e.source}</span>
                           <span className="font-medium text-sm">{e.product_name}</span>
                           {e.warehouse_name && <span className="text-xs text-gray-500 ml-2">{e.warehouse_name}</span>}

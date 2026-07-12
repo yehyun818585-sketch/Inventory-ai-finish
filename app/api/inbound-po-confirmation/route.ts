@@ -44,13 +44,16 @@ function verifyAttachmentContent(
   expectedOrderNumber: string,
   items: { product_name: string; product_code: string; quantity: number }[]
 ): { verified: boolean; reason: string | null } {
-  const poMatch = text.match(/PO-\d{6}-\d{2}/)
+  // PDF 텍스트 추출 시 표 셀 경계 등에서 줄바꿈/공백이 끼어 "PO-260710-\n01"처럼 끊기는 경우가 있어,
+  // 정규식 적용 전에 공백을 먼저 제거한다 (안 그러면 발주번호가 버젓이 있어도 정규식이 못 찾아서
+  // 이 1차 검증을 건너뛰고 더 약한 폴백 검증으로 새버리는 문제가 생김).
+  const normalizedText = normalizeForMatch(text)
+  const poMatch = normalizedText.match(/PO-\d{6}-\d{2}/)
   if (poMatch) {
     if (poMatch[0] === expectedOrderNumber) return { verified: true, reason: null }
     return { verified: false, reason: `이메일 제목(${expectedOrderNumber})과 첨부파일 안 발주번호(${poMatch[0]})가 다릅니다.` }
   }
 
-  const normalizedText = normalizeForMatch(text)
   const matched = items.some(i => {
     const qtyFound = normalizedText.includes(String(i.quantity))
     if (!qtyFound) return false

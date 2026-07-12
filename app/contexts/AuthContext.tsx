@@ -9,7 +9,7 @@ interface Profile {
   email: string
   name: string
   role: '본사' | '창고'
-  position: '관리팀원' | '관리책임자' | '대표' | null
+  position: '관리팀원' | '관리책임자' | '대표' | '담당자' | null
   onboarding_completed: boolean
   company_id: string | null
 }
