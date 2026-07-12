@@ -775,7 +775,16 @@ export default function ChatWidget() {
       if (data.action === '출고' && Array.isArray(data.items) && data.items.length > 0) {
         await resolveMultiOutbound(data)
       } else if (detectedItems.length > 1) {
-        await resolveMultiOutbound({ ...data, action: '출고', items: detectedItems })
+        // 다품목 안전망을 탈 때는 GPT 응답의 channel/sub_type도 신뢰하기 어려우므로(품목조차
+        // 놓친 응답이라 채널도 같이 놓쳤을 가능성이 높음), 원문에서 등록된 채널명을 직접 다시 찾는다.
+        const detectedChannel = channels.find(c => userMessage.includes(c.name))
+        await resolveMultiOutbound({
+          ...data,
+          action: '출고',
+          items: detectedItems,
+          channel: data.channel || detectedChannel?.name || null,
+          sub_type: data.sub_type || (detectedChannel ? '판매' : undefined)
+        })
       } else if (data.action === '입고' || data.action === '출고' || data.action === '창고이동') {
         await resolveAction(data)
       } else if (data.action === '질문' || data.action === '답변') {
