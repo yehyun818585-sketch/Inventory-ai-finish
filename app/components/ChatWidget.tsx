@@ -24,6 +24,7 @@ interface Channel {
 interface StaffProfile {
   id: string
   name: string
+  employee_number: string | null
 }
 
 interface InventoryItem {
@@ -90,16 +91,28 @@ function resolveRegisteredChannel(
 // AI가 뽑아낸 수령자 이름(오타 가능)을 등록된 본사 역할 사용자 목록의 정확한 이름으로 치환.
 // 내부사용(샘플)은 등록된 사용자 계정과 연결돼야 본인만 수령확인할 수 있으므로, 채널명 매칭과
 // 같은 원리로 여기서도 프론트에서 한 번 더 확정한다.
+// 이름은 동명이인이 있을 수 있어 매칭이 여러 명으로 갈리면(ambiguous) 임의로 첫 명을 고르지 않고
+// 사번으로 되묻는다 — 되묻기 응답(사번 숫자만 입력)도 이 함수가 그대로 처리한다.
 function resolveRegisteredRecipient(
   nameInput: string | null | undefined,
-  staff: { id: string; name: string }[]
-): { id: string | null; name: string | null; unmatched: boolean } {
-  if (!nameInput) return { id: null, name: null, unmatched: true }
-  const exact = staff.find(s => s.name === nameInput)
-  if (exact) return { id: exact.id, name: exact.name, unmatched: false }
-  const fuzzy = staff.find(s => s.name.includes(nameInput) || nameInput.includes(s.name))
-  if (fuzzy) return { id: fuzzy.id, name: fuzzy.name, unmatched: false }
-  return { id: null, name: null, unmatched: true }
+  staff: StaffProfile[]
+): { id: string | null; name: string | null; unmatched: boolean; ambiguous: StaffProfile[] | null } {
+  if (!nameInput) return { id: null, name: null, unmatched: true, ambiguous: null }
+  const trimmed = nameInput.trim()
+
+  // 동명이인 되묻기에 사번으로 답한 경우
+  const byNumber = staff.find(s => !!s.employee_number && s.employee_number === trimmed)
+  if (byNumber) return { id: byNumber.id, name: byNumber.name, unmatched: false, ambiguous: null }
+
+  const exact = staff.filter(s => s.name === trimmed)
+  if (exact.length === 1) return { id: exact[0].id, name: exact[0].name, unmatched: false, ambiguous: null }
+  if (exact.length > 1) return { id: null, name: null, unmatched: false, ambiguous: exact }
+
+  const fuzzy = staff.filter(s => s.name.includes(trimmed) || trimmed.includes(s.name))
+  if (fuzzy.length === 1) return { id: fuzzy[0].id, name: fuzzy[0].name, unmatched: false, ambiguous: null }
+  if (fuzzy.length > 1) return { id: null, name: null, unmatched: false, ambiguous: fuzzy }
+
+  return { id: null, name: null, unmatched: true, ambiguous: null }
 }
 
 // GPT가 다품목 요청(예: "쿠션100+립밤100 출고")을 프롬프트 지침대로 items 배열로 안정적으로
@@ -309,7 +322,7 @@ export default function ChatWidget() {
     // 내부사용(샘플) 수령자 후보 — 본사 역할만 (창고담당자는 반출을 기록하는 쪽이라 제외)
     const { data: staffData } = await supabase
       .from('profiles')
-      .select('id, name')
+      .select('id, name, employee_number')
       .eq('company_id', cid)
       .eq('role', '본사')
 
@@ -436,7 +449,15 @@ export default function ChatWidget() {
       }
       if (data.internal_use_reason === '샘플') {
         // 샘플은 등록된 사용자와 연결돼야 본인만 수령확인할 수 있음 — 채널명처럼 원문을 다시 매칭
-        const { id, name, unmatched } = resolveRegisteredRecipient(data.internal_use_recipient, staffProfiles)
+        const { id, name, unmatched, ambiguous } = resolveRegisteredRecipient(data.internal_use_recipient, staffProfiles)
+        if (ambiguous) {
+          const list = ambiguous.map(s => `${s.name}(사번 ${s.employee_number || '미등록'})`).join(', ')
+          setMessages(prev => [...prev, {
+            role: 'assistant',
+            content: `"${data.internal_use_recipient}"님이 여러 명입니다. 사번으로 다시 알려주세요: ${list}`
+          }])
+          return
+        }
         if (unmatched) {
           const staffNames = staffProfiles.map(s => s.name).join(', ')
           setMessages(prev => [...prev, {
@@ -679,7 +700,15 @@ export default function ChatWidget() {
           return
         }
         if (data.internal_use_reason === '샘플') {
-          const { id, name, unmatched } = resolveRegisteredRecipient(data.internal_use_recipient, staffProfiles)
+          const { id, name, unmatched, ambiguous } = resolveRegisteredRecipient(data.internal_use_recipient, staffProfiles)
+          if (ambiguous) {
+            const list = ambiguous.map(s => `${s.name}(사번 ${s.employee_number || '미등록'})`).join(', ')
+            setMessages(prev => [...prev, {
+              role: 'assistant',
+              content: `"${data.internal_use_recipient}"님이 여러 명입니다. 사번으로 다시 알려주세요: ${list}`
+            }])
+            return
+          }
           if (unmatched) {
             const staffNames = staffProfiles.map(s => s.name).join(', ')
             setMessages(prev => [...prev, {

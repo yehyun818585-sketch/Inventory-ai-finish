@@ -26,6 +26,7 @@ interface Channel {
 interface StaffProfile {
   id: string
   name: string
+  employee_number: string | null
 }
 
 interface Transaction {
@@ -210,7 +211,7 @@ export default function TransactionsPage() {
     // 내부사용(샘플) 수령자 후보 — 본사 역할만 (창고담당자는 반출을 기록하는 쪽이라 수령자 후보에서 제외)
     const { data: staffData } = await supabase
       .from('profiles')
-      .select('id, name')
+      .select('id, name, employee_number')
       .eq('company_id', cid)
       .eq('role', '본사')
       .order('name', { ascending: true })
@@ -865,7 +866,7 @@ export default function TransactionsPage() {
                         >
                           <option value="">수령자 선택</option>
                           {staffProfiles.map(s => (
-                            <option key={s.id} value={s.id}>{s.name}</option>
+                            <option key={s.id} value={s.id}>{s.name}{s.employee_number ? ` (사번 ${s.employee_number})` : ''}</option>
                           ))}
                         </select>
                       )}

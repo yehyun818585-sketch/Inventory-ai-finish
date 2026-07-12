@@ -39,6 +39,8 @@ export default function SettingsPage() {
   })
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
+  const [inviteCode, setInviteCode] = useState('')
+  const [copied, setCopied] = useState(false)
 
   useEffect(() => {
     if (!profile?.company_id) return
@@ -48,11 +50,12 @@ export default function SettingsPage() {
   async function fetchSettings() {
     const { data } = await supabase
       .from('companies')
-      .select('name, industry, default_shelf_life_months, shelf_life_warning_ratio, inventory_unit, reconciliation_grace_days, outbound_grace_days, po_confirmation_reminder_days, shipping_cutoff_time')
+      .select('name, industry, default_shelf_life_months, shelf_life_warning_ratio, inventory_unit, reconciliation_grace_days, outbound_grace_days, po_confirmation_reminder_days, shipping_cutoff_time, invite_code')
       .eq('id', profile!.company_id!)
       .single()
 
     if (data) {
+      setInviteCode(data.invite_code || '')
       setSettings({
         name: data.name || '',
         industry: data.industry || '기타',
@@ -139,6 +142,26 @@ export default function SettingsPage() {
               onChange={(e) => setSettings(prev => ({ ...prev, name: e.target.value }))}
               className="w-full border rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
             />
+          </div>
+
+          {/* 초대코드 — 동료가 회원가입 시 회사명 대신 이 코드로만 합류할 수 있음 */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">회사 초대코드</label>
+            <p className="text-xs text-gray-400 mb-2">동료가 회원가입할 때 이 코드를 입력하면 우리 회사로 합류합니다. 회사명만으로는 합류할 수 없어요(다른 회사와 이름이 겹칠 수 있어서).</p>
+            <div className="flex items-center gap-2">
+              <span className="border rounded-lg px-4 py-2 bg-gray-50 font-mono tracking-widest text-gray-700">{inviteCode || '-'}</span>
+              <button
+                type="button"
+                onClick={() => {
+                  navigator.clipboard.writeText(inviteCode)
+                  setCopied(true)
+                  setTimeout(() => setCopied(false), 1500)
+                }}
+                className="text-sm bg-blue-600 text-white px-3 py-2 rounded-lg hover:bg-blue-700 transition"
+              >
+                {copied ? '복사됨!' : '복사'}
+              </button>
+            </div>
           </div>
 
           {/* 업종 */}
