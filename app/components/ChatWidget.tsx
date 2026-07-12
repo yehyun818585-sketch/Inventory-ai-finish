@@ -21,6 +21,11 @@ interface Channel {
   name: string
 }
 
+interface StaffProfile {
+  id: string
+  name: string
+}
+
 interface InventoryItem {
   product_id: string
   warehouse_id: string
@@ -47,8 +52,9 @@ interface Message {
     lot_number?: string  // 입고 시 로트번호 (YYMMDD-01)
     note?: string
     sub_type?: string  // 출고 사유: 판매/내부사용/폐기 (출고 시 필수)
-    internal_use_reason?: string  // 내부사용 세부사유: 샘플/협찬/테스트/기타
-    internal_use_recipient?: string  // 내부사용 수령자
+    internal_use_reason?: string  // 내부사용 세부사유: 샘플/협찬
+    internal_use_recipient?: string  // 내부사용 수령자 이름 (GPT가 뽑은 원문, 확정 표시용)
+    internal_use_recipient_user_id?: string  // 샘플일 때: 등록된 사용자로 확정된 id (본인만 수령확인 가능하게 하려면 필요)
   }
 }
 
@@ -80,6 +86,21 @@ function resolveRegisteredChannel(
   const fuzzy = channels.find(c => c.name.includes(channelInput) || channelInput.includes(c.name))
   if (fuzzy) return { name: fuzzy.name, unmatched: false }
   return { name: null, unmatched: true }
+}
+
+// AI가 뽑아낸 수령자 이름(오타 가능)을 등록된 본사 역할 사용자 목록의 정확한 이름으로 치환.
+// 내부사용(샘플)은 등록된 사용자 계정과 연결돼야 본인만 수령확인할 수 있으므로, 채널명 매칭과
+// 같은 원리로 여기서도 프론트에서 한 번 더 확정한다.
+function resolveRegisteredRecipient(
+  nameInput: string | null | undefined,
+  staff: { id: string; name: string }[]
+): { id: string | null; name: string | null; unmatched: boolean } {
+  if (!nameInput) return { id: null, name: null, unmatched: true }
+  const exact = staff.find(s => s.name === nameInput)
+  if (exact) return { id: exact.id, name: exact.name, unmatched: false }
+  const fuzzy = staff.find(s => s.name.includes(nameInput) || nameInput.includes(s.name))
+  if (fuzzy) return { id: fuzzy.id, name: fuzzy.name, unmatched: false }
+  return { id: null, name: null, unmatched: true }
 }
 
 // GPT가 다품목 요청(예: "쿠션100+립밤100 출고")을 프롬프트 지침대로 items 배열로 안정적으로
@@ -127,6 +148,7 @@ export default function ChatWidget() {
   const [products, setProducts] = useState<Product[]>([])
   const [warehouses, setWarehouses] = useState<Warehouse[]>([])
   const [channels, setChannels] = useState<Channel[]>([])
+  const [staffProfiles, setStaffProfiles] = useState<StaffProfile[]>([])
   // inventory 상태는 resolveWarehouse에서 실시간 Supabase 직접 조회로 대체됨
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [todayTransactions, setTodayTransactions] = useState<any[]>([])
@@ -143,6 +165,7 @@ export default function ChatWidget() {
     sub_type: string
     internal_use_reason?: string
     internal_use_recipient?: string
+    internal_use_recipient_user_id?: string
     date?: string
   }
   const [pendingMultiAction, setPendingMultiAction] = useState<MultiOutboundPending | null>(null)
@@ -284,6 +307,13 @@ export default function ChatWidget() {
       .select('id, name')
       .eq('company_id', cid)
 
+    // 내부사용(샘플) 수령자 후보 — 본사 역할만 (창고담당자는 반출을 기록하는 쪽이라 제외)
+    const { data: staffData } = await supabase
+      .from('profiles')
+      .select('id, name')
+      .eq('company_id', cid)
+      .eq('role', '본사')
+
     const todayStart = new Date()
     todayStart.setHours(0, 0, 0, 0)
     const { data: txData } = await supabase
@@ -296,6 +326,7 @@ export default function ChatWidget() {
     setProducts(productsData || [])
     setWarehouses(warehousesData || [])
     setChannels(channelsData || [])
+    setStaffProfiles(staffData || [])
     setTodayTransactions(txData || [])
   }
 
@@ -399,9 +430,29 @@ export default function ChatWidget() {
       setMessages(prev => [...prev, { role: 'assistant', content: '출고 사유가 필요합니다. 판매 / 내부사용 / 폐기 중 어느 쪽인가요?' }])
       return
     }
-    if (data.sub_type === '내부사용' && (!data.internal_use_reason || !data.internal_use_recipient)) {
-      setMessages(prev => [...prev, { role: 'assistant', content: '내부사용 세부사유(샘플/협찬/테스트/기타)와 수령자를 알려주세요.' }])
-      return
+    let resolvedRecipientUserId: string | undefined
+    let resolvedRecipientName: string | undefined
+    if (data.sub_type === '내부사용') {
+      if (!data.internal_use_reason || !data.internal_use_recipient) {
+        setMessages(prev => [...prev, { role: 'assistant', content: '내부사용 세부사유(샘플/협찬)와 수령자를 알려주세요.' }])
+        return
+      }
+      if (data.internal_use_reason === '샘플') {
+        // 샘플은 등록된 사용자와 연결돼야 본인만 수령확인할 수 있음 — 채널명처럼 원문을 다시 매칭
+        const { id, name, unmatched } = resolveRegisteredRecipient(data.internal_use_recipient, staffProfiles)
+        if (unmatched) {
+          const staffNames = staffProfiles.map(s => s.name).join(', ')
+          setMessages(prev => [...prev, {
+            role: 'assistant',
+            content: `"${data.internal_use_recipient}"님을 찾을 수 없습니다. 등록된 사용자 중 누구인가요? (${staffNames})`
+          }])
+          return
+        }
+        resolvedRecipientUserId = id!
+        resolvedRecipientName = name!
+      } else {
+        resolvedRecipientName = data.internal_use_recipient
+      }
     }
 
     let channel: string | null = null
@@ -488,7 +539,7 @@ export default function ChatWidget() {
     }
 
     const reasonLabel = data.sub_type === '내부사용'
-      ? ` (내부사용: ${data.internal_use_reason}, 수령자 ${data.internal_use_recipient})`
+      ? ` (내부사용: ${data.internal_use_reason}, 수령자 ${resolvedRecipientName})`
       : ` (${data.sub_type})`
     const summary = `다음 품목을 ${warehouse.name}에서 출고합니다${channel ? ` → ${channel}` : ''}${reasonLabel}:\n` +
       resolvedItems.map(i => `- ${i.product.product_name} ${i.quantity.toLocaleString()}개`).join('\n')
@@ -499,7 +550,8 @@ export default function ChatWidget() {
       channel,
       sub_type: data.sub_type,
       internal_use_reason: data.internal_use_reason,
-      internal_use_recipient: data.internal_use_recipient,
+      internal_use_recipient: resolvedRecipientName,
+      internal_use_recipient_user_id: resolvedRecipientUserId,
       date: data.date
     })
     setMessages(prev => [...prev, { role: 'assistant', content: summary }])
@@ -564,6 +616,8 @@ export default function ChatWidget() {
         remaining -= deduct
       }
 
+      const isInternalUse = pending.sub_type === '내부사용'
+      const isSample = isInternalUse && pending.internal_use_reason === '샘플'
       const { error: txError } = await supabase.from('transactions').insert([{
         product_id: product.id,
         warehouse_id: pending.warehouse.id,
@@ -574,7 +628,10 @@ export default function ChatWidget() {
         note: `${noteText} | ${lotDeductions.join(', ')}`,
         recorded_by: profile?.name || 'AI',
         created_at: transactionDate,
-        company_id: profile?.company_id
+        company_id: profile?.company_id,
+        internal_use_category: isInternalUse ? pending.internal_use_reason : null,
+        internal_use_recipient_user_id: isSample ? pending.internal_use_recipient_user_id : null,
+        internal_use_recipient_name: isInternalUse ? pending.internal_use_recipient : null
       }])
       if (txError) {
         console.error('❌ 트랜잭션 저장 실패:', txError.message)
@@ -616,12 +673,26 @@ export default function ChatWidget() {
         }])
         return
       }
-      if (data.sub_type === '내부사용' && (!data.internal_use_reason || !data.internal_use_recipient)) {
-        setMessages(prev => [...prev, {
-          role: 'assistant',
-          content: '내부사용 세부사유(샘플/협찬/테스트/기타)와 수령자를 알려주세요.'
-        }])
-        return
+      if (data.sub_type === '내부사용') {
+        if (!data.internal_use_reason || !data.internal_use_recipient) {
+          setMessages(prev => [...prev, {
+            role: 'assistant',
+            content: '내부사용 세부사유(샘플/협찬)와 수령자를 알려주세요.'
+          }])
+          return
+        }
+        if (data.internal_use_reason === '샘플') {
+          const { id, name, unmatched } = resolveRegisteredRecipient(data.internal_use_recipient, staffProfiles)
+          if (unmatched) {
+            const staffNames = staffProfiles.map(s => s.name).join(', ')
+            setMessages(prev => [...prev, {
+              role: 'assistant',
+              content: `"${data.internal_use_recipient}"님을 찾을 수 없습니다. 등록된 사용자 중 누구인가요? (${staffNames})`
+            }])
+            return
+          }
+          data = { ...data, internal_use_recipient: name!, internal_use_recipient_user_id: id! }
+        }
       }
     }
     if (data.channel) {
@@ -1037,6 +1108,8 @@ export default function ChatWidget() {
         }
 
         // 입출고 기록 저장
+        const isInternalUse = pendingAction.action === '출고' && pendingAction.sub_type === '내부사용'
+        const isSample = isInternalUse && pendingAction.internal_use_reason === '샘플'
         const { error: txError } = await supabase.from('transactions').insert([{
           product_id: product.id,
           warehouse_id: warehouse.id,
@@ -1047,7 +1120,10 @@ export default function ChatWidget() {
           note: noteText,
           recorded_by: profile?.name || 'AI',
           created_at: transactionDate,
-          company_id: profile?.company_id
+          company_id: profile?.company_id,
+          internal_use_category: isInternalUse ? pendingAction.internal_use_reason : null,
+          internal_use_recipient_user_id: isSample ? pendingAction.internal_use_recipient_user_id : null,
+          internal_use_recipient_name: isInternalUse ? pendingAction.internal_use_recipient : null
         }])
         if (txError) {
           console.error('❌ 트랜잭션 저장 실패:', txError.message)

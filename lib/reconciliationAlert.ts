@@ -228,7 +228,7 @@ export async function runInternalUseWeeklyDigest(
   const weekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000).toISOString()
   const { data: txs } = await supabase
     .from('transactions')
-    .select('quantity, note, created_at, products(product_name)')
+    .select('quantity, note, created_at, internal_use_category, internal_use_recipient_name, internal_use_confirmed_at, products(product_name)')
     .eq('company_id', companyId)
     .eq('type', '출고')
     .eq('sub_type', '내부사용')
@@ -243,17 +243,21 @@ export async function runInternalUseWeeklyDigest(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const rows = txs.map((t: AnyRowLike, i: number) => {
     const detailMatch = t.note?.match(/\[내부사용:([^\]]+)\] 수령자: ([^|]+)/)
-    const detail = detailMatch ? `${detailMatch[1]} · ${detailMatch[2].trim()}` : '-'
+    const category = t.internal_use_category || detailMatch?.[1] || '-'
+    const recipient = t.internal_use_recipient_name || detailMatch?.[2]?.trim() || '-'
+    const confirmStatus = t.internal_use_category === '샘플'
+      ? (t.internal_use_confirmed_at ? ' · 수령확인 완료' : ' · 수령확인 대기')
+      : ''
     return `
       <tr style="border-bottom:1px solid #f0f0f0;">
         <td style="padding:10px 8px;font-weight:500;">${i + 1}. ${t.products?.product_name || ''}</td>
-        <td style="padding:10px 8px;color:#666;">${detail}</td>
+        <td style="padding:10px 8px;color:#666;">${category} · ${recipient}${confirmStatus}</td>
         <td style="padding:10px 8px;text-align:right;font-weight:bold;">${t.quantity.toLocaleString()}개</td>
       </tr>`
   }).join('')
 
   const html = buildEmailHtml(companyName, '의 최근 7일간 내부사용 반출 내역입니다.', [
-    { label: '📦 내부사용 반출 (샘플/협찬/테스트/기타)', color: '#d97706', rows, count: txs.length }
+    { label: '📦 내부사용 반출 (샘플/협찬)', color: '#d97706', rows, count: txs.length }
   ])
 
   const { error } = await resend.emails.send({

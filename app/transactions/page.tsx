@@ -23,6 +23,11 @@ interface Channel {
   name: string
 }
 
+interface StaffProfile {
+  id: string
+  name: string
+}
+
 interface Transaction {
   id: string
   product_id: string
@@ -39,6 +44,9 @@ interface Transaction {
   created_at: string
   return_of_transaction_id: string | null
   evidence_file_url: string | null
+  internal_use_category: string | null
+  internal_use_recipient_name: string | null
+  internal_use_confirmed_at: string | null
   products: Product | null
   warehouses: Warehouse | null
 }
@@ -55,6 +63,7 @@ export default function TransactionsPage() {
   const [products, setProducts] = useState<Product[]>([])
   const [warehouses, setWarehouses] = useState<Warehouse[]>([])
   const [channels, setChannels] = useState<Channel[]>([])
+  const [staffProfiles, setStaffProfiles] = useState<StaffProfile[]>([])
   const [transactions, setTransactions] = useState<Transaction[]>([])
   const [loading, setLoading] = useState(true)
   const [showForm, setShowForm] = useState(false)
@@ -80,8 +89,9 @@ export default function TransactionsPage() {
     stock_type: '일반',      // 재고 구분: 일반 / 반품격리(반품 입고 시)
     return_of_transaction_id: '', // 반품 입고 시: 원 출고 건 참조 (근거 없는 반품 차단)
     quarantine: false,       // 반품 입고 시: 재판매 불가(격리) 처리 여부 — 실물 확인 후 담당자가 최종 판단
-    internal_use_reason: '', // 내부사용 세부사유: 샘플/협찬/테스트/기타
-    internal_use_recipient: '' // 내부사용 수령자
+    internal_use_reason: '', // 내부사용 세부사유: 샘플(테스트)/협찬
+    internal_use_recipient: '', // 내부사용 수령자 (협찬: 자유 텍스트 / 샘플: 선택된 사용자 이름 표시용)
+    internal_use_recipient_user_id: '' // 샘플일 때만: 등록된 사용자 중 선택 (본인만 수령확인 가능하게 하려면 실제 계정과 연결돼야 함)
   })
   const [returnPhoto, setReturnPhoto] = useState<File | null>(null)
   const [returnSourceOptions, setReturnSourceOptions] = useState<ReturnSourceOption[]>([])
@@ -198,6 +208,14 @@ export default function TransactionsPage() {
       .eq('company_id', cid)
       .order('name', { ascending: true })
 
+    // 내부사용(샘플) 수령자 후보 — 본사 역할만 (창고담당자는 반출을 기록하는 쪽이라 수령자 후보에서 제외)
+    const { data: staffData } = await supabase
+      .from('profiles')
+      .select('id, name')
+      .eq('company_id', cid)
+      .eq('role', '본사')
+      .order('name', { ascending: true })
+
     const { data: transactionsData } = await supabase
       .from('transactions')
       .select(`
@@ -212,6 +230,7 @@ export default function TransactionsPage() {
     setProducts(productsData || [])
     setWarehouses(warehousesData || [])
     setChannels(channelsData || [])
+    setStaffProfiles(staffData || [])
     setTransactions(transactionsData || [])
     setLoading(false)
   }
@@ -250,8 +269,16 @@ export default function TransactionsPage() {
 
     // 내부사용인 경우 세부사유 + 수령자 필수 (무사유 반출 차단)
     if (formData.type === '출고' && formData.sub_type === '내부사용') {
-      if (!formData.internal_use_reason || !formData.internal_use_recipient.trim()) {
-        alert('내부사용 세부사유와 수령자를 입력해주세요.')
+      if (!formData.internal_use_reason) {
+        alert('내부사용 세부사유를 선택해주세요.')
+        return
+      }
+      if (formData.internal_use_reason === '샘플' && !formData.internal_use_recipient_user_id) {
+        alert('수령자(등록된 사용자)를 선택해주세요.')
+        return
+      }
+      if (formData.internal_use_reason === '협찬' && !formData.internal_use_recipient.trim()) {
+        alert('수령자(협찬 대상)를 입력해주세요.')
         return
       }
     }
@@ -582,8 +609,13 @@ export default function TransactionsPage() {
         // 재고 차감 성공 후 출고 기록 저장 (로트 정보 포함)
         const outboundResultingQty = await getTotalInventory(formData.product_id, formData.warehouse_id)
         const lotNote = `[로트] ${lotDeductions.join(' / ')}`
-        const internalUseNote = formData.sub_type === '내부사용'
-          ? `[내부사용:${formData.internal_use_reason}] 수령자: ${formData.internal_use_recipient.trim()}`
+        const isInternalUse = formData.sub_type === '내부사용'
+        const isSample = isInternalUse && formData.internal_use_reason === '샘플'
+        const resolvedRecipientName = isSample
+          ? staffProfiles.find(s => s.id === formData.internal_use_recipient_user_id)?.name || ''
+          : formData.internal_use_recipient.trim()
+        const internalUseNote = isInternalUse
+          ? `[내부사용:${formData.internal_use_reason}] 수령자: ${resolvedRecipientName}`
           : null
         const finalNote = [formData.note, internalUseNote, lotNote].filter(Boolean).join(' | ')
         const { error: txError } = await supabase
@@ -599,7 +631,10 @@ export default function TransactionsPage() {
             note: finalNote,
             recorded_by: profile?.name || null,
             created_at: transactionDate,
-            company_id: profile?.company_id
+            company_id: profile?.company_id,
+            internal_use_category: isInternalUse ? formData.internal_use_reason : null,
+            internal_use_recipient_user_id: isSample ? formData.internal_use_recipient_user_id : null,
+            internal_use_recipient_name: isInternalUse ? resolvedRecipientName : null
           }])
         if (txError) { alert('기록 실패: ' + txError.message); return }
       }
@@ -622,7 +657,8 @@ export default function TransactionsPage() {
       return_of_transaction_id: '',
       quarantine: false,
       internal_use_reason: '',
-      internal_use_recipient: ''
+      internal_use_recipient: '',
+      internal_use_recipient_user_id: ''
     })
     setReturnPhoto(null)
     setShowForm(false)
@@ -877,7 +913,7 @@ export default function TransactionsPage() {
                   <select
                     required
                     value={formData.sub_type}
-                    onChange={(e) => setFormData({...formData, sub_type: e.target.value, internal_use_reason: '', internal_use_recipient: ''})}
+                    onChange={(e) => setFormData({...formData, sub_type: e.target.value, internal_use_reason: '', internal_use_recipient: '', internal_use_recipient_user_id: ''})}
                     className="w-full border rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-red-500"
                   >
                     <option value="">사유 선택</option>
@@ -896,29 +932,51 @@ export default function TransactionsPage() {
                     <select
                       required
                       value={formData.internal_use_reason}
-                      onChange={(e) => setFormData({...formData, internal_use_reason: e.target.value})}
+                      onChange={(e) => setFormData({...formData, internal_use_reason: e.target.value, internal_use_recipient: '', internal_use_recipient_user_id: ''})}
                       className="w-full border rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-red-500"
                     >
                       <option value="">세부사유 선택</option>
-                      <option value="샘플">샘플</option>
+                      <option value="샘플">샘플(테스트 포함)</option>
                       <option value="협찬">협찬</option>
-                      <option value="테스트">테스트</option>
-                      <option value="기타">기타</option>
                     </select>
                   </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      수령자 *
-                    </label>
-                    <input
-                      type="text"
-                      required
-                      placeholder="예: 마케팅팀 김민지"
-                      value={formData.internal_use_recipient}
-                      onChange={(e) => setFormData({...formData, internal_use_recipient: e.target.value})}
-                      className="w-full border rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-red-500"
-                    />
-                  </div>
+                  {formData.internal_use_reason === '샘플' && (
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        수령자 * <span className="text-gray-400 font-normal">(등록된 사용자만 수령확인 가능)</span>
+                      </label>
+                      {staffProfiles.length === 0 ? (
+                        <p className="text-sm text-gray-500">등록된 본사 사용자가 없습니다.</p>
+                      ) : (
+                        <select
+                          required
+                          value={formData.internal_use_recipient_user_id}
+                          onChange={(e) => setFormData({...formData, internal_use_recipient_user_id: e.target.value})}
+                          className="w-full border rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-red-500"
+                        >
+                          <option value="">수령자 선택</option>
+                          {staffProfiles.map(s => (
+                            <option key={s.id} value={s.id}>{s.name}</option>
+                          ))}
+                        </select>
+                      )}
+                    </div>
+                  )}
+                  {formData.internal_use_reason === '협찬' && (
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        수령자 * <span className="text-gray-400 font-normal">(외부 대상 — 확인 절차 없음)</span>
+                      </label>
+                      <input
+                        type="text"
+                        required
+                        placeholder="예: OO 인플루언서"
+                        value={formData.internal_use_recipient}
+                        onChange={(e) => setFormData({...formData, internal_use_recipient: e.target.value})}
+                        className="w-full border rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-red-500"
+                      />
+                    </div>
+                  )}
                 </>
               )}
               <div>
@@ -1252,7 +1310,16 @@ export default function TransactionsPage() {
                             <>
                               {userNote && <p className="text-xs text-gray-400">메모: {userNote}</p>}
                               {returnInfo && <p className="text-xs text-purple-500">반품: {returnInfo}</p>}
-                              {internalUseInfo && <p className="text-xs text-amber-600">내부사용: {internalUseInfo}</p>}
+                              {internalUseInfo && (
+                                <p className="text-xs text-amber-600">
+                                  내부사용: {internalUseInfo}
+                                  {tx.internal_use_category === '샘플' && (
+                                    tx.internal_use_confirmed_at
+                                      ? <span className="text-green-600"> · 수령확인 완료</span>
+                                      : <span className="text-orange-500"> · 수령확인 대기</span>
+                                  )}
+                                </p>
+                              )}
                               {lotInfo && <p className="text-xs text-gray-400">{lotInfo}</p>}
                             </>
                           )

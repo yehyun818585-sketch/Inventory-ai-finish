@@ -395,8 +395,8 @@ export async function POST(request: Request) {
   "date": "YYYY-MM-DD (날짜 지정시)",
   "lot_number": "YYMMDD-01 (입고시 필수)",
   "sub_type": "판매" | "내부사용" | "폐기" (출고 시 필수),
-  "internal_use_reason": "샘플" | "협찬" | "테스트" | "기타" (sub_type이 내부사용일 때 필수),
-  "internal_use_recipient": "수령자 (sub_type이 내부사용일 때 필수)",
+  "internal_use_reason": "샘플" | "협찬" (sub_type이 내부사용일 때 필수 — 딱 이 2개 값만 허용, 그 외 값 금지),
+  "internal_use_recipient": "수령자 이름 (sub_type이 내부사용일 때 필수, 사용자가 말한 이름 그대로)",
   "message": "사용자에게 보여줄 메시지"
 }
 
@@ -409,8 +409,8 @@ product_name/quantity 단수 필드 대신 items 배열을 쓸 것. 이 경우 g
   "channel": "채널명 (외부출고시)",
   "date": "YYYY-MM-DD (날짜 지정시)",
   "sub_type": "판매" | "내부사용" | "폐기" (필수),
-  "internal_use_reason": "샘플" | "협찬" | "테스트" | "기타" (sub_type이 내부사용일 때 필수),
-  "internal_use_recipient": "수령자 (sub_type이 내부사용일 때 필수)",
+  "internal_use_reason": "샘플" | "협찬" (sub_type이 내부사용일 때 필수 — 딱 이 2개 값만 허용),
+  "internal_use_recipient": "수령자 이름 (sub_type이 내부사용일 때 필수)",
   "message": "사용자에게 보여줄 메시지"
 }
 
@@ -455,8 +455,9 @@ product_name/quantity 단수 필드 대신 items 배열을 쓸 것. 이 경우 g
 action:"출고"는 반드시 sub_type("판매"|"내부사용"|"폐기")을 포함해야 함. 아래 순서로 딱 한 번만 판단하고, 애매하면 바로 질문으로 끝낼 것(다른 질문과 섞지 말 것):
 1. channel이 있으면 → sub_type:"판매" (더 물어볼 필요 없음, 바로 진행)
 2. "폐기"/"버림"/"불량 처리" 언급 → sub_type:"폐기" (더 물어볼 필요 없음, 바로 진행)
-3. "내부사용"/"사내"/"사무실로"/"직원 지급"/"협찬"/"테스트용"/"샘플로 나감" 언급 → sub_type:"내부사용"
-   - internal_use_reason("샘플"|"협찬"|"테스트"|"기타")과 internal_use_recipient(수령자)까지 둘 다 있어야 action:"출고" 반환. 없으면 action:"질문"으로 "내부사용 세부사유(샘플/협찬/테스트/기타)와 수령자를 알려주세요"만 묻고 끝낼 것
+3. "내부사용"/"내부반출"/"반출"/"사내"/"사무실로"/"직원 지급"/"협찬"/"테스트용"/"테스트"/"샘플"/"샘플출고"/"샘플로 나감" 언급 → sub_type:"내부사용"
+   - internal_use_reason은 딱 "샘플" 또는 "협찬" 둘 중 하나만 가능(그 외 값 절대 금지). "테스트"라고 말해도 internal_use_reason은 "샘플"로 매핑할 것(테스트는 샘플 카테고리에 포함됨). "협찬"이라고 명시했을 때만 "협찬"
+   - internal_use_reason과 internal_use_recipient(수령자 이름)까지 둘 다 있어야 action:"출고" 반환. 없으면 action:"질문"으로 "내부사용 세부사유(샘플/협찬)와 수령자를 알려주세요"만 묻고 끝낼 것
 4. 위 어디에도 해당 안 되면(채널·내부사용·폐기 표현이 전혀 없으면) → action:"질문"으로 딱 이거 하나만 물을 것: "판매(어느 채널인가요? ${channelNames}), 내부사용(사내 반출), 폐기 중 어느 경우인가요?"
 ★ 재고 수량 확인·창고 선택 등 다른 이유로 질문하지 말 것 — sub_type 판단은 재고 조회와 무관하게 사용자 문장만으로 즉시 정해짐
 

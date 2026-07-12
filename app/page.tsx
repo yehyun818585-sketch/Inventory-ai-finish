@@ -100,6 +100,8 @@ export default function Home() {
   const [actionAlerts, setActionAlerts] = useState({ overdueCount: 0, evidenceCount: 0, unmatchedCount: 0 })
   const [monthlyReportConfirmedAt, setMonthlyReportConfirmedAt] = useState<string | null>(null)
   const [confirmingMonthlyReport, setConfirmingMonthlyReport] = useState(false)
+  const [pendingReceipts, setPendingReceipts] = useState<{ id: string; quantity: number; created_at: string; products: { product_name: string } | null }[]>([])
+  const [confirmingReceiptId, setConfirmingReceiptId] = useState<string | null>(null)
 
   // Command bar
   const [command, setCommand] = useState('')
@@ -123,8 +125,9 @@ export default function Home() {
     if (!profile?.company_id) return
     fetchData()
     loadActionAlerts(profile.company_id)
+    loadPendingReceipts()
     setRecentCmds(getRecentCommands())
-  }, [profile?.company_id])
+  }, [profile?.company_id]) // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (!profile?.company_id) return
@@ -214,6 +217,31 @@ export default function Home() {
     await supabase.from('companies').update({ monthly_report_confirmed_at: now }).eq('id', profile.company_id)
     setMonthlyReportConfirmedAt(now)
     setConfirmingMonthlyReport(false)
+  }
+
+  // 내부사용(샘플) 반출 중 나에게 온, 아직 수령확인 안 한 건 — 반출 기록자와 확인자가
+  // 분리돼야 하므로 본인 앞으로 온 것만 여기서 보여준다.
+  async function loadPendingReceipts() {
+    if (!profile?.id) return
+    const { data } = await supabase
+      .from('transactions')
+      .select('id, quantity, created_at, products(product_name)')
+      .eq('internal_use_recipient_user_id', profile.id)
+      .is('internal_use_confirmed_at', null)
+      .order('created_at', { ascending: false })
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    setPendingReceipts((data as any) || [])
+  }
+
+  async function confirmReceipt(transactionId: string) {
+    setConfirmingReceiptId(transactionId)
+    const { error } = await supabase
+      .from('transactions')
+      .update({ internal_use_confirmed_at: new Date().toISOString() })
+      .eq('id', transactionId)
+    setConfirmingReceiptId(null)
+    if (error) { alert('확인 처리 실패: ' + error.message); return }
+    loadPendingReceipts()
   }
 
   async function fetchData() {
@@ -420,6 +448,30 @@ export default function Home() {
                     확인 완료
                   </button>
                 </div>
+              </div>
+            </div>
+          )}
+
+          {/* ── 내부사용(샘플) 수령확인 대기: 반출 기록자와 확인자가 분리돼야 하므로 본인 앞으로 온 것만 ── */}
+          {pendingReceipts.length > 0 && (
+            <div className="bg-white border border-amber-300 rounded-xl p-4 mb-4 shadow-sm">
+              <div className="flex items-center gap-2 mb-2">
+                <span className="text-xl">📦</span>
+                <span className="font-bold text-amber-700">수령 확인 대기 ({pendingReceipts.length}건)</span>
+              </div>
+              <div className="space-y-2">
+                {pendingReceipts.map(r => (
+                  <div key={r.id} className="flex items-center justify-between text-sm border-t pt-2 first:border-t-0 first:pt-0">
+                    <span>{r.products?.product_name || '(삭제된 제품)'} {r.quantity.toLocaleString()}개 — {new Date(r.created_at).toLocaleDateString('ko-KR')}</span>
+                    <button
+                      onClick={() => confirmReceipt(r.id)}
+                      disabled={confirmingReceiptId === r.id}
+                      className="text-xs bg-amber-500 text-white px-2.5 py-1.5 rounded-lg hover:bg-amber-600 disabled:opacity-50 transition shrink-0"
+                    >
+                      수령확인
+                    </button>
+                  </div>
+                ))}
               </div>
             </div>
           )}
