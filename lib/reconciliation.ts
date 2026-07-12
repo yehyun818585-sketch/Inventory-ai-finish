@@ -396,7 +396,7 @@ export async function getOutboundEvidenceExceptions(
 ): Promise<{ exceptions: EvidenceExceptionRow[]; nonTransport: NonTransportRow[] }> {
   const { data: txs } = await client
     .from('transactions')
-    .select('id, quantity, evidence_file_url, evidence_quantity, shipping_type, created_at, products(product_name), warehouses(name)')
+    .select('id, quantity, evidence_file_url, evidence_quantity, shipping_type, sub_type, created_at, products(product_name), warehouses(name)')
     .eq('company_id', companyId)
     .eq('type', '출고')
 
@@ -404,6 +404,10 @@ export async function getOutboundEvidenceExceptions(
   const nonTransport: NonTransportRow[] = []
 
   ;(txs || []).forEach((t: AnyRow) => {
+    // 내부사용 반출은 외부 제3자 증빙(운송장) 개념이 없음 — 수령확인이 그 자리를 대신하고,
+    // 그건 별도로(주간요약 + 대시보드 수령확인 + 여기 완료 목록에) 관리한다.
+    if (t.sub_type === '내부사용') return
+
     const base = {
       transaction_id: t.id,
       product_name: t.products?.product_name || '',

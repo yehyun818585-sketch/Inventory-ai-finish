@@ -37,9 +37,11 @@ interface CompletedEvidenceRow {
   product_name: string
   warehouse_name: string | null
   quantity: number
-  evidence_file_url: string
+  evidence_file_url: string | null
   created_at: string
   source: EvidenceSourceLabel
+  is_internal_use?: boolean
+  recipient_name?: string | null
 }
 
 const SHIPPING_TYPES = ['택배/화물', '자차배송', '직접픽업'] as const
@@ -80,7 +82,7 @@ export default function ExceptionsPage() {
 
   async function load(companyId: string) {
     setLoading(true)
-    const [{ data: companyData }, inbound, outbound, transfer, inboundEvidence, outboundEvidence, { data: completedTx }] = await Promise.all([
+    const [{ data: companyData }, inbound, outbound, transfer, inboundEvidence, outboundEvidence, { data: completedTx }, { data: confirmedInternalUse }] = await Promise.all([
       supabase.from('companies').select('reconciliation_grace_days, outbound_grace_days').eq('id', companyId).single(),
       getInboundReconciliation(companyId),
       getOutboundReconciliation(companyId),
@@ -93,6 +95,16 @@ export default function ExceptionsPage() {
         .eq('company_id', companyId)
         .in('type', ['입고', '출고'])
         .not('evidence_file_url', 'is', null)
+        .order('created_at', { ascending: false }),
+      // 내부사용(샘플)은 파일 증빙이 없는 대신 수령확인이 그 역할을 하므로, 확인된 건은 여기서
+      // 완료로 같이 보여준다 (미확인 건은 대시보드 수령확인 배너 + 주간요약으로만 관리, 여기 안 뜸).
+      supabase
+        .from('transactions')
+        .select('id, quantity, created_at, internal_use_recipient_name, products(product_name), warehouses(name)')
+        .eq('company_id', companyId)
+        .eq('type', '출고')
+        .eq('internal_use_category', '샘플')
+        .not('internal_use_confirmed_at', 'is', null)
         .order('created_at', { ascending: false })
     ])
     const grace = companyData?.reconciliation_grace_days ?? 3
@@ -123,18 +135,32 @@ export default function ExceptionsPage() {
     setNonTransport(outboundEvidence.nonTransport)
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const completedFromEvidence: CompletedEvidenceRow[] = (completedTx || [])
+      .filter((t: any) => t.evidence_quantity === t.quantity)
+      .map((t: any) => ({
+        transaction_id: t.id,
+        product_name: t.products?.product_name || '',
+        warehouse_name: t.warehouses?.name || null,
+        quantity: t.quantity,
+        evidence_file_url: t.evidence_file_url,
+        created_at: t.created_at,
+        source: t.type as EvidenceSourceLabel
+      }))
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const completedFromInternalUse: CompletedEvidenceRow[] = (confirmedInternalUse || []).map((t: any) => ({
+      transaction_id: t.id,
+      product_name: t.products?.product_name || '',
+      warehouse_name: t.warehouses?.name || null,
+      quantity: t.quantity,
+      evidence_file_url: null,
+      created_at: t.created_at,
+      source: '출고' as EvidenceSourceLabel,
+      is_internal_use: true,
+      recipient_name: t.internal_use_recipient_name
+    }))
     setCompletedEvidence(
-      (completedTx || [])
-        .filter((t: any) => t.evidence_quantity === t.quantity)
-        .map((t: any) => ({
-          transaction_id: t.id,
-          product_name: t.products?.product_name || '',
-          warehouse_name: t.warehouses?.name || null,
-          quantity: t.quantity,
-          evidence_file_url: t.evidence_file_url,
-          created_at: t.created_at,
-          source: t.type as EvidenceSourceLabel
-        }))
+      [...completedFromEvidence, ...completedFromInternalUse]
+        .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
     )
     setLoading(false)
   }
@@ -567,12 +593,16 @@ export default function ExceptionsPage() {
                       </div>
                       <div className="flex items-center gap-3">
                         <span className="text-green-700 font-semibold text-sm">{c.quantity.toLocaleString()}개</span>
-                        <button
-                          onClick={() => viewEvidence(c.transaction_id, c.evidence_file_url)}
-                          className="text-xs text-blue-600 hover:underline shrink-0"
-                        >
-                          보기
-                        </button>
+                        {c.is_internal_use ? (
+                          <span className="text-xs text-green-700 shrink-0">{c.recipient_name || '수령자'} 확인</span>
+                        ) : (
+                          <button
+                            onClick={() => viewEvidence(c.transaction_id, c.evidence_file_url!)}
+                            className="text-xs text-blue-600 hover:underline shrink-0"
+                          >
+                            보기
+                          </button>
+                        )}
                       </div>
                     </div>
                   ))}
