@@ -39,6 +39,8 @@ interface DocumentDetail {
   confirmed_date: string | null
   confirmation_file_url: string | null
   channel_order_file_url: string | null
+  po_confirmation_review_needed: boolean
+  po_confirmation_review_reason: string | null
   supplier_name: string | null
   supplier_id: string | null
   supplier_email: string | null
@@ -96,7 +98,7 @@ export default function ApprovalDetailPage() {
       .select(`
         id, doc_type, status, warehouse_id, to_warehouse_id, channel, memo,
         expected_date, confirmed_date, confirmation_file_url, channel_order_file_url, supplier_name, supplier_id, supplier_email,
-        order_number, po_sent_at, po_sent_to,
+        order_number, po_sent_at, po_sent_to, po_confirmation_review_needed, po_confirmation_review_reason,
         requested_by, requested_by_user_id, approved_by, approved_at, created_at,
         warehouses:warehouse_id (name),
         to_warehouse:to_warehouse_id (name),
@@ -125,6 +127,16 @@ export default function ApprovalDetailPage() {
       }))
       setLotPreviews(previews)
     }
+  }
+
+  async function acknowledgeReviewNeeded() {
+    if (!doc) return
+    const { error } = await supabase
+      .from('approval_documents')
+      .update({ po_confirmation_review_needed: false })
+      .eq('id', doc.id)
+    if (error) { alert('처리 실패: ' + error.message); return }
+    load()
   }
 
   async function viewEvidence() {
@@ -356,6 +368,27 @@ export default function ApprovalDetailPage() {
           <button onClick={() => router.push('/approvals')} className="text-sm text-gray-500 hover:text-gray-700 mb-4 inline-block">
             ← 목록으로
           </button>
+
+          {doc.po_confirmation_review_needed && (
+            <div className="bg-red-600 text-white rounded-xl p-4 mb-4 shadow-md">
+              <div className="flex items-center justify-between flex-wrap gap-3">
+                <div className="flex items-center gap-2">
+                  <span className="text-xl">⚠️</span>
+                  <span className="font-bold">확인 필요 — 발주확인서 자동검증 실패</span>
+                </div>
+                <button
+                  onClick={acknowledgeReviewNeeded}
+                  className="text-sm bg-white text-red-700 font-medium px-3 py-1.5 rounded-lg hover:bg-red-50 transition shrink-0"
+                >
+                  확인 완료
+                </button>
+              </div>
+              {doc.po_confirmation_review_reason && (
+                <p className="text-sm text-red-100 mt-1">{doc.po_confirmation_review_reason}</p>
+              )}
+              <p className="text-xs text-red-100 mt-1">아래 "납기 확정"으로 직접 확인 후 입력해주세요.</p>
+            </div>
+          )}
 
           <div className="bg-white rounded-lg shadow overflow-hidden">
             {/* 문서 헤더 */}

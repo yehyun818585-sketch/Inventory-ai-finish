@@ -172,18 +172,24 @@ export async function POST(request: Request) {
 
   const confirmedDate = heldReason ? null : extractConfirmedDate(text || '')
 
-  if (!heldReason) {
-    const update: Record<string, string> = {}
+  if (heldReason) {
+    // 알림만 보내면 안 읽고 지나쳤을 때 그대로 묻히므로, 문서 자체에도 "확인 필요" 상태를 남겨
+    // 상세페이지에서 빨간 배너로 보이게 한다.
+    const { error: flagError } = await supabase
+      .from('approval_documents')
+      .update({ po_confirmation_review_needed: true, po_confirmation_review_reason: heldReason })
+      .eq('id', doc.id)
+    if (flagError) console.error('발주확인서 검토필요 플래그 저장 실패:', flagError)
+  } else {
+    const update: Record<string, string | boolean> = { po_confirmation_review_needed: false }
     if (filePath) update.confirmation_file_url = filePath
     if (confirmedDate) update.confirmed_date = confirmedDate
 
-    if (Object.keys(update).length > 0) {
-      const { error: updateError } = await supabase
-        .from('approval_documents')
-        .update(update)
-        .eq('id', doc.id)
-      if (updateError) console.error('발주확인서 자동 반영 실패:', updateError)
-    }
+    const { error: updateError } = await supabase
+      .from('approval_documents')
+      .update(update)
+      .eq('id', doc.id)
+    if (updateError) console.error('발주확인서 자동 반영 실패:', updateError)
   }
 
   if (doc.requested_by_user_id) {
