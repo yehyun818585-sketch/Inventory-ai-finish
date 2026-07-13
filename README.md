@@ -67,10 +67,13 @@
 * **발주확인서 자동회수 및 검증**
   거래처가 회신 메일로 발주확인서를 보내면, 사람 개입 없이 **PDF를 검증해 문서에 자동 반영**합니다. 회신이 없으면 수동 확정 + 리마인드로 안전망을 둡니다.
   
-  | 발주 발송 | 거래처 수신 | 거래처 회신 | 발주번호 자동인식-불일치시, 알림 | 일치시, 알림 |발주확인서 자동첨부
-  |---|---|---|
-   ---|---|---|
-  | <img width="829" height="782" alt="2" src="https://github.com/user-attachments/assets/9c2494b2-a5b0-4570-aeec-591bffe979a8" /> | <img width="1153" height="708" alt="3" src="https://github.com/user-attachments/assets/b00a9629-c12e-42ff-bdac-e57ae5970264" /> | <img width="562" height="397" alt="4" src="https://github.com/user-attachments/assets/7fef20f7-2b20-48e5-ba54-f517be990197" /> | <img width="807" height="772" alt="6" src="https://github.com/user-attachments/assets/5c445863-dd94-4112-8d54-4fffe3662b96" /> | <img width="427" height="147" alt="7" src="https://github.com/user-attachments/assets/b5d01d43-2f86-4c50-8ec1-48d49390a637" /> |<img width="801" height="567" alt="8" src="https://github.com/user-attachments/assets/75937379-9282-4420-8527-750a4dff333e" />
+ | 발주 발송 | 거래처 수신 | 거래처 회신 |
+| :--- | :--- | :--- |
+| <img width="829" height="782" alt="2" src="https://github.com/user-attachments/assets/9c2494b2-a5b0-4570-aeec-591bffe979a8" /> | <img width="1153" height="708" alt="3" src="https://github.com/user-attachments/assets/b00a9629-c12e-42ff-bdac-e57ae5970264" /> | <img width="562" height="397" alt="4" src="https://github.com/user-attachments/assets/7fef20f7-2b20-48e5-ba54-f517be990197" /> |
+
+| 발주번호 자동인식-불일치시, 알림 | 일치시, 알림 | 발주확인서 자동첨부 |
+| :--- | :--- | :--- |
+| <img width="807" height="772" alt="6" src="https://github.com/user-attachments/assets/5c445863-dd94-4112-8d54-4fffe3662b96" /> | <img width="427" height="147" alt="7" src="https://github.com/user-attachments/assets/b5d01d43-2f86-4c50-8ec1-48d49390a637" /> | <img width="801" height="567" alt="8" src="https://github.com/user-attachments/assets/75937379-9282-4420-8527-750a4dff333e" /> |
 
 
   
