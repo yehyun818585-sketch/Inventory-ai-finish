@@ -40,6 +40,25 @@
 
 ---
 
+##  핵심 설계 원칙 ② — 입력 자동화로 담당자의 편의성 증대
+
+> 사람이 입력을 미루면 기록에 공백이 생기는 문제점을 예방하기 위해, **자연어·엑셀·이메일을 구조화된 기록으로 자동 변환**해 기록 부담을 최소화 
+
+```
+자연어 chat    →  GPT 의도추출   →  정규식·제품목록 재검증    →  입출고 기록
+자사몰 엑셀     →  수량 자동합산   →  "엑셀 내 최신 주문일시" 기준 →  확정 출고일
+거래처 회신메일  →  Worker 수신    →  PDF 발주번호·수량 대조     →  외부증빙 자동첨부
+```
+
+- **자연어 기반 인터페이스** — "핸드로션 30개 올영 출고" → 채널·사유·창고·로트까지 구조화. GPT 출력은 그대로 믿지 않고 프론트 정규식·제품목록으로 재검증(무사유 반출·미등록 채널 차단).
+- **엑셀은 자동인식** — 자사몰 주문 엑셀에서 상품별 수량을 합산하고, 제출 시각이 아닌 "엑셀 내 최신 주문일시" 기준으로 확정 출고일을 계산.
+- **증빙의 자동회수 시스템** — 거래처가 회신하면 사람 개입 없이 PDF 발주번호·수량을 대조해 문서에 자동 반영. 회신이 없으면 수동 확정 + 리마인드로 안전망.
+
+> **편의성이 만든 기록을 강제성(3자 대사)이 다시 검증하는 system**
+
+---
+
+
 ##  데모 계정
 
 | 역할 | 이메일 | 비밀번호 |
@@ -90,6 +109,56 @@
 
 </details>
 
+##  기술 파이프라인
+
+```mermaid
+flowchart TB
+    subgraph CONV["🟢 편의성 — 입력 자동화 (기록의 문턱 제거)"]
+        direction LR
+        WH["창고담당자<br/>자연어 입력"] --> CHAT["ChatWidget"]
+        CHAT --> API_CHAT["/api/chat<br/>GPT-4o-mini · tool use"]
+        API_CHAT --> SAFE["프론트 정규식·제품목록<br/>재검증 안전망"]
+        XLS["자사몰 주문 엑셀"] --> UPLOAD["/upload<br/>수량 합산 · 최신 주문일 기준 확정출고일"]
+    end
+
+    subgraph APPR["📝 승인 워크플로"]
+        direction LR
+        STAFF["관리팀원"] --> DRAFT["/approvals 기안"]
+        DRAFT --> APPROVE["2단계 결재<br/>자기승인 차단"]
+        APPROVE --> POSEND["/api/send-purchase-order<br/>Resend 발송"]
+    end
+
+    subgraph EXT["📨 외부증빙 자동회수"]
+        direction LR
+        POSEND --> VENDOR["거래처"]
+        VENDOR -->|회신 메일| CFW["Cloudflare<br/>Email Worker"]
+        CFW --> INBOUND["/api/inbound-po-confirmation<br/>PDF 텍스트 추출·발주번호·수량 대조"]
+    end
+
+    SAFE --> TX[("transactions<br/>실물기록 ②")]
+    UPLOAD --> TX
+    APPROVE --> DOC1[("승인증빙 ①<br/>발주품의서")]
+    INBOUND --> DOC3[("외부증빙 ③<br/>발주확인서·거래명세서")]
+
+    subgraph FORCE["🔴 강제성 — 3자 대사 (교차검증)"]
+        direction LR
+        RECON["lib/reconciliation.ts<br/>①↔②↔③ 대조"] --> EXC["/exceptions 예외리스트<br/>미기록 · 증빙없음 · 불일치"]
+    end
+
+    DOC1 --> RECON
+    TX --> RECON
+    DOC3 --> RECON
+
+    subgraph CTRL["🛡️ 통제 계층"]
+        direction LR
+        RLS["Supabase RLS<br/>transactions INSERT=창고만<br/>승인자 ≠ 기안자"]
+        ALERT["알림 · Realtime + Vercel Cron<br/>→ Resend 이메일"]
+    end
+
+    RLS -.강제.-> TX
+    RLS -.강제.-> DOC1
+    EXC --> ALERT
+```
 ---
 
 ##  기술 스택
