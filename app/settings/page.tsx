@@ -85,7 +85,6 @@ export default function SettingsPage() {
     if (!profile?.company_id) return
     setSaving(true)
 
-    console.log('💾 저장 시도:', { company_id: profile.company_id, ...settings })
 
     const { error, data } = await supabase
       .from('companies')
@@ -103,7 +102,6 @@ export default function SettingsPage() {
       .eq('id', profile.company_id)
       .select()
 
-    console.log('💾 저장 결과:', { error, data })
 
     setSaving(false)
     if (error) {

@@ -13,7 +13,6 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: '컬럼 목록이 필요합니다' }, { status: 400 })
     }
 
-    console.log('🤖 [AI] 창고 감지 요청:', columns)
 
     // 재고 관련 컬럼만 필터링
     const qtyKeywords = ['재고', '수량', 'qty', 'quantity', 'stock']
@@ -23,11 +22,9 @@ export async function POST(request: Request) {
     })
 
     if (inventoryColumns.length === 0) {
-      console.log('🤖 [AI] 재고 관련 컬럼 없음')
       return NextResponse.json({ warehouses: [] })
     }
 
-    console.log('🤖 [AI] 재고 관련 컬럼:', inventoryColumns)
 
     const prompt = `다음은 엑셀 파일의 컬럼명 목록입니다. 이 중에서 "실제 물리적 창고/지점/위치"를 나타내는 컬럼만 골라주세요.
 
@@ -63,10 +60,8 @@ export async function POST(request: Request) {
     })
 
     const content = response.choices[0]?.message?.content || '{"warehouses": []}'
-    console.log('🤖 [AI] 응답:', content)
 
     const result = JSON.parse(content)
-    console.log('🤖 [AI] 감지된 창고:', result.warehouses)
 
     return NextResponse.json(result)
   } catch (error) {

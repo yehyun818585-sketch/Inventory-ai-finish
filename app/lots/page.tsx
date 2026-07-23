@@ -158,7 +158,6 @@ export default function LotsPage() {
     const warningRatio = companyData?.shelf_life_warning_ratio || 0.25
     setCompanyShelfLife(shelfLife)
     setCompanyWarningRatio(warningRatio)
-    console.log('🏢 shelfLife:', shelfLife, '/ warningRatio:', warningRatio, '/ companyData:', JSON.stringify(companyData))
 
     const { data: inventoryData } = await supabase
       .from('inventory')
@@ -202,7 +201,6 @@ export default function LotsPage() {
           const warningThresholdDays = totalDays * warningRatio
 
           if (item.lot_number?.startsWith('250')) {
-            console.log('📦 임박체크:', item.lot_number, '| 제조일:', mfgDate.toLocaleDateString(), '| 유통기한:', expiryDate.toLocaleDateString(), '| 남은일:', daysRemaining, '| 임박기준:', warningThresholdDays, '| shelfLife:', shelfLifeMonths)
           }
 
           if (daysRemaining <= 0) {

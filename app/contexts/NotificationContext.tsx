@@ -64,7 +64,6 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
         }, 6000)
       })
       .subscribe((status) => {
-        console.log(`🔔 [notifications] realtime status: ${status}`)
       })
 
     return () => { supabase.removeChannel(channel) }

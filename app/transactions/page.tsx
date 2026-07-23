@@ -473,9 +473,6 @@ export default function TransactionsPage() {
         // products 상태에서 직접 shelf_life_months 가져오기 (조인 불필요)
         const selectedProduct = products.find(p => p.id === formData.product_id)
         const shelfLifeMonths = selectedProduct?.shelf_life_months || 24
-        console.log('[FIFO] selectedProduct:', selectedProduct)
-        console.log('[FIFO] shelfLifeMonths:', shelfLifeMonths)
-        console.log('[FIFO] inventoryLots:', inventoryLots)
 
         const today = new Date()
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -488,7 +485,6 @@ export default function TransactionsPage() {
           expiry.setMonth(expiry.getMonth() + shelfLifeMonths)
           const days = Math.ceil((expiry.getTime() - today.getTime()) / (1000 * 60 * 60 * 24))
           const result = days <= shelfLifeMonths * 30 * 0.25
-          console.log(`[FIFO] lot: ${lot.lot_number}, days: ${days}, threshold: ${shelfLifeMonths * 30 * 0.25}, isExpiredOrWarning: ${result}`)
           return result
         }
 
@@ -504,7 +500,6 @@ export default function TransactionsPage() {
             if (a.lot_number && b.lot_number) return a.lot_number.localeCompare(b.lot_number)
             return 0
           })
-        console.log('[FIFO] eligible lots:', eligible)
 
         const eligibleTotal = eligible.reduce((sum: number, lot: any) => sum + lot.quantity, 0)
         if (eligibleTotal < formData.quantity) {

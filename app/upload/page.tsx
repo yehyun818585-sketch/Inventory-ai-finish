@@ -209,14 +209,12 @@ export default function UploadPage() {
   // 페이지 로드 시 창고 목록 가져오기
   useEffect(() => {
     async function fetchWarehouses() {
-      console.log('🏭 [시작] 창고 목록 불러오기...')
       const { data, error } = await supabase.from('warehouses').select('id, name').eq('company_id', profile?.company_id || '')
       if (error) {
         console.error('❌ [에러] 창고 목록 불러오기 실패:', error.message)
         return
       }
       if (data) {
-        console.log(`✅ [성공] 창고 ${data.length}개 발견:`, data.map(w => w.name).join(', '))
         setWarehouses(data)
         // 창고별 매핑 초기화
         const initialWarehouseMapping: { [key: string]: string } = {}
@@ -225,7 +223,6 @@ export default function UploadPage() {
         })
         setColumnMapping(prev => ({ ...prev, warehouse_qty: initialWarehouseMapping }))
       } else {
-        console.log('⚠️ [경고] 등록된 창고가 없습니다')
       }
     }
     fetchWarehouses()
@@ -234,19 +231,15 @@ export default function UploadPage() {
   function handleFileUpload(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
     if (!file) {
-      console.log('⚠️ [경고] 파일이 선택되지 않음')
       return
     }
 
-    console.log('📁 [시작] 엑셀 파일 읽기:', file.name, `(${(file.size / 1024).toFixed(1)}KB)`)
     setFileName(file.name)
 
     const reader = new FileReader()
     reader.onload = async (event) => {
-      console.log('📖 [진행] 파일 읽기 완료, 엑셀 파싱 시작...')
       const data = event.target?.result
       const workbook = XLSX.read(data, { type: 'binary' })
-      console.log(`📊 [정보] 전체 시트 수: ${workbook.SheetNames.length}, 시트명:`, workbook.SheetNames)
 
       // 각 시트 행 수 파악
       const sheets = workbook.SheetNames.map(sName => {
@@ -259,7 +252,6 @@ export default function UploadPage() {
       setSelectedSheets(sheets.map(s => s.name))  // 전부 체크
       setWorkbookRef(workbook)
       setUploadStep('sheet')
-      console.log('➡️ [단계] 1-1단계(시트 선택)로 이동')
     }
     reader.onerror = (error) => {
       console.error('❌ [에러] 파일 읽기 실패:', error)
@@ -269,7 +261,6 @@ export default function UploadPage() {
 
   // 엑셀 컬럼에서 창고 자동 감지 (OpenAI 사용)
   async function detectWarehousesFromColumns(columns: string[]): Promise<DetectedWarehouse[]> {
-    console.log('🤖 [AI] 창고 감지 API 호출 중...')
 
     try {
       const response = await fetch('/api/detect-warehouses', {
@@ -284,7 +275,6 @@ export default function UploadPage() {
       }
 
       const data = await response.json()
-      console.log('🤖 [AI] 감지 결과:', data.warehouses)
 
       if (data.warehouses && data.warehouses.length > 0) {
         return data.warehouses.map((w: { column: string; name: string }) => ({
@@ -322,7 +312,6 @@ export default function UploadPage() {
 
           if (warehouseName && warehouseName.length >= 2) {
             detected.push({ name: warehouseName, column: col })
-            console.log(`   🏭 [폴백] 창고 감지: "${col}" → 창고명: "${warehouseName}"`)
           }
         }
       }
@@ -336,7 +325,6 @@ export default function UploadPage() {
     // 엑셀에서 창고 자동 감지 (AI 사용)
     const detected = await detectWarehousesFromColumns(columns)
     setDetectedWarehouses(detected)
-    console.log(`🏭 [감지] 엑셀에서 ${detected.length}개 창고 발견:`, detected.map(d => d.name).join(', ') || '없음')
 
     // 창고별 매핑 초기화 (감지된 창고 기반)
     const warehouseQtyMapping: { [key: string]: string } = {}
@@ -399,7 +387,6 @@ export default function UploadPage() {
       const rows = XLSX.utils.sheet_to_json<ExcelRow>(ws)
       rows.forEach(row => { row['__sheet_name__'] = sName })
       allRows.push(...rows)
-      console.log(`   📋 시트 "${sName}": ${rows.length}개 행 추가`)
     }
 
     if (allRows.length === 0) {
@@ -418,9 +405,6 @@ export default function UploadPage() {
 
   // 매핑 적용하여 데이터 파싱
   async function applyMappingAndParse() {
-    console.log('🔄 [시작] 매핑 적용 및 데이터 파싱...')
-    console.log('📋 [정보] 현재 매핑 설정:', columnMapping)
-    console.log(`📊 [정보] 원본 데이터: ${rawData.length}개 행`)
 
     let skippedNoName = 0
     let skippedNoInventory = 0
@@ -452,7 +436,6 @@ export default function UploadPage() {
           const qty = Number(row[detected.column])
           if (qty > 0) {
             inventories.push({ warehouse_name: detected.name, quantity: qty })
-            console.log(`   📦 [행${index + 1}] ${detected.name}: ${qty}개`)
           }
         }
       }
@@ -468,7 +451,6 @@ export default function UploadPage() {
             .replace(/재고현황|현황|재고|수량/g, '') // 불필요 단어 제거
             .trim() || rawSheet
           inventories.push({ warehouse_name: warehouseName, quantity: qty })
-          console.log(`   📦 [행${index + 1}] 일반재고 → ${warehouseName} (원본 시트: "${rawSheet}"): ${qty}개`)
         }
       }
 
@@ -500,20 +482,13 @@ export default function UploadPage() {
       return true
     })
 
-    console.log('✅ [완료] 데이터 파싱 결과:')
-    console.log(`   - 유효한 제품: ${parsed.length}개`)
-    console.log(`   - 총 재고 항목: ${totalInventoryCount}개`)
-    console.log(`   - 제외됨 (제품명 없음): ${skippedNoName}개`)
-    console.log(`   - 재고 없는 제품: ${skippedNoInventory}개`)
 
     if (parsed.length > 0) {
-      console.log('📋 [샘플] 첫 번째 파싱 결과:', parsed[0])
     }
 
     setParsedData(parsed)
     setUploadStep('preview')
     setUserConfirmedOff(new Set())
-    console.log('➡️ [단계] 3단계(미리보기)로 이동')
 
     // AI 분류 + 제품군 상속 병합
     const uniqueNames = [...new Set(parsed.map(p => p.product_name).filter(Boolean))]
@@ -589,59 +564,42 @@ export default function UploadPage() {
   }
 
   async function handleDelete() {
-    console.log('🗑️ [시작] 데이터 삭제 시작...')
-    console.log(`   삭제 옵션: ${deleteOption === 'all' ? '전체 삭제' : '재고+입출고만 삭제'}`)
     setDeleting(true)
 
     try {
       const cid = profile?.company_id || ''
       if (deleteOption === 'all') {
         // 전체 삭제: transactions → 재고 → 제품 → 창고 순서
-        console.log('   1/4 트랜잭션 삭제 중...')
         const { error: e1 } = await supabase.from('transactions').delete().eq('company_id', cid)
         if (e1) console.error('   ❌ 트랜잭션 삭제 실패:', e1.message)
-        else console.log('   ✅ 트랜잭션 삭제 완료')
 
-        console.log('   2/4 재고 삭제 중...')
         const { error: e2 } = await supabase.from('inventory').delete().eq('company_id', cid)
         if (e2) console.error('   ❌ 재고 삭제 실패:', e2.message)
-        else console.log('   ✅ 재고 삭제 완료')
 
-        console.log('   3/4 제품 삭제 중...')
         const { error: e3 } = await supabase.from('products').delete().eq('company_id', cid)
         if (e3) console.error('   ❌ 제품 삭제 실패:', e3.message)
-        else console.log('   ✅ 제품 삭제 완료')
 
-        console.log('   4/4 창고 삭제 중...')
         const { error: e4 } = await supabase.from('warehouses').delete().eq('company_id', cid)
         if (e4) console.error('   ❌ 창고 삭제 실패:', e4.message)
-        else console.log('   ✅ 창고 삭제 완료')
 
         // 창고 목록 상태 초기화
         setWarehouses([])
 
-        console.log('🎉 [완료] 전체 데이터 삭제 완료 (창고 포함)')
         alert('모든 데이터가 삭제되었습니다.\n(제품, 재고, 입출고 기록, 창고 전체)')
       } else {
         // 재고만 삭제
-        console.log('   1/2 트랜잭션 삭제 중...')
         const { error: e1 } = await supabase.from('transactions').delete().eq('company_id', cid)
         if (e1) console.error('   ❌ 트랜잭션 삭제 실패:', e1.message)
-        else console.log('   ✅ 트랜잭션 삭제 완료')
 
-        console.log('   2/2 재고 삭제 중...')
         const { error: e2 } = await supabase.from('inventory').delete().eq('company_id', cid)
         if (e2) console.error('   ❌ 재고 삭제 실패:', e2.message)
-        else console.log('   ✅ 재고 삭제 완료')
 
-        console.log('🎉 [완료] 재고+입출고 삭제 완료 (제품 유지)')
         alert('재고 및 입출고 기록이 삭제되었습니다.\n(제품 목록은 유지됨)')
       }
 
       // AI 리포트 캐시도 삭제
       localStorage.removeItem('ai_report')
       localStorage.removeItem('ai_report_time')
-      console.log('   ✅ AI 리포트 캐시 삭제 완료')
 
       setShowDeleteModal(false)
       setDeleteStep(1)  // 초기화
@@ -650,7 +608,6 @@ export default function UploadPage() {
       alert('삭제 중 오류가 발생했습니다. F12 콘솔을 확인하세요.')
     } finally {
       setDeleting(false)
-      console.log('🏁 [종료] 삭제 프로세스 종료')
     }
   }
 
@@ -660,15 +617,12 @@ export default function UploadPage() {
   }
 
   async function handleUpload() {
-    console.log('🚀 [시작] DB 업로드 시작...')
 
     if (parsedData.length === 0) {
-      console.log('❌ [중단] 업로드할 데이터가 없습니다')
       alert('업로드할 데이터가 없습니다.')
       return
     }
 
-    console.log(`📊 [정보] 업로드 대상: ${parsedData.length}개 제품`)
     setUploading(true)
 
     // 통계 추적
@@ -681,7 +635,6 @@ export default function UploadPage() {
 
     try {
       // 창고 목록 가져오기 (업로드용)
-      console.log('🏭 [진행] 창고 목록 조회...')
       const { data: warehouseData, error: warehouseError } = await supabase.from('warehouses').select('*').eq('company_id', profile?.company_id || '')
 
       if (warehouseError) {
@@ -690,12 +643,9 @@ export default function UploadPage() {
       }
 
       const warehouseMap = new Map(warehouseData?.map(w => [w.name, w.id]) || [])
-      console.log(`✅ [정보] 창고 매핑 완료: ${warehouseMap.size}개`)
-      console.log('   창고 매핑:', Object.fromEntries(warehouseMap))
 
       for (let i = 0; i < parsedData.length; i++) {
         const item = parsedData[i]
-        console.log(`\n📦 [${i + 1}/${parsedData.length}] 처리 중: ${item.product_name} (${item.product_code})`)
 
         // 1. 제품 등록 (이미 있으면 스킵)
         const { data: existingProduct, error: findError } = await supabase
@@ -714,9 +664,7 @@ export default function UploadPage() {
         if (existingProduct) {
           productId = existingProduct.id
           productExisted++
-          console.log(`   ✓ 기존 제품 발견 (ID: ${productId})`)
         } else {
-          console.log(`   + 신규 제품 등록 중...`)
           const { data: newProduct, error } = await supabase
             .from('products')
             .insert([{
@@ -739,14 +687,11 @@ export default function UploadPage() {
           }
           productId = newProduct.id
           productCreated++
-          console.log(`   ✅ 제품 등록 완료 (ID: ${productId})`)
         }
 
         // 2. 재고 등록 (로트번호 포함)
-        console.log(`   📋 재고 항목: ${item.inventories.length}개`)
 
         if (item.inventories.length === 0) {
-          console.log(`   ⚠️ 재고 정보 없음 - 스킵`)
         }
 
         for (const inv of item.inventories) {
@@ -754,7 +699,6 @@ export default function UploadPage() {
 
           // 창고가 없으면 자동 생성
           if (!warehouseId) {
-            console.log(`   🏭 창고 "${inv.warehouse_name}" 없음 → 자동 생성 중...`)
             const { data: newWarehouse, error: warehouseCreateError } = await supabase
               .from('warehouses')
               .insert([{ name: inv.warehouse_name, company_id: profile?.company_id }])
@@ -769,10 +713,8 @@ export default function UploadPage() {
 
             warehouseId = newWarehouse.id
             warehouseMap.set(inv.warehouse_name, warehouseId)
-            console.log(`   ✅ 창고 생성 완료: ${inv.warehouse_name} (ID: ${warehouseId})`)
           }
 
-          console.log(`   🏭 ${inv.warehouse_name} (${warehouseId}): ${inv.quantity}개`)
 
           // 기존 재고 확인 (로트번호도 함께 체크)
           let existingInvQuery = supabase
@@ -789,12 +731,10 @@ export default function UploadPage() {
           const { data: existingInv, error: invFindError } = await existingInvQuery.maybeSingle()
 
           if (invFindError && invFindError.code !== 'PGRST116') {
-            console.log(`      ⚠️ 재고 조회 에러:`, invFindError.message)
           }
 
           if (existingInv) {
             // 기존 재고 업데이트
-            console.log(`      ↻ 기존 재고 업데이트: ${existingInv.quantity} → ${inv.quantity}`)
             const { error: updateError } = await supabase
               .from('inventory')
               .update({
@@ -807,11 +747,9 @@ export default function UploadPage() {
               console.error(`      ❌ 재고 업데이트 실패:`, updateError.message)
             } else {
               inventoryUpdated++
-              console.log(`      ✅ 재고 업데이트 완료`)
             }
           } else {
             // 새 재고 생성
-            console.log(`      + 신규 재고 생성: ${inv.quantity}개, 로트: ${item.lot_number || '없음'}`)
             const { error: insertError } = await supabase
               .from('inventory')
               .insert([{
@@ -826,25 +764,12 @@ export default function UploadPage() {
               console.error(`      ❌ 재고 생성 실패:`, insertError.message)
             } else {
               inventoryCreated++
-              console.log(`      ✅ 재고 생성 완료`)
             }
           }
         }
       }
 
       // 최종 결과 출력
-      console.log('\n' + '='.repeat(50))
-      console.log('🎉 [완료] DB 업로드 완료!')
-      console.log('='.repeat(50))
-      console.log(`📊 제품 처리 결과:`)
-      console.log(`   - 신규 생성: ${productCreated}개`)
-      console.log(`   - 기존 발견: ${productExisted}개`)
-      console.log(`   - 실패: ${productFailed}개`)
-      console.log(`📦 재고 처리 결과:`)
-      console.log(`   - 신규 생성: ${inventoryCreated}개`)
-      console.log(`   - 업데이트: ${inventoryUpdated}개`)
-      console.log(`   - 스킵 (창고 매핑 실패): ${inventorySkipped}개`)
-      console.log('='.repeat(50))
 
       // 업로드 완료 후 임박 상품 자동 체크 및 이메일 발송
       fetch('/api/check-expiry-alert', {
@@ -853,9 +778,7 @@ export default function UploadPage() {
         body: JSON.stringify({ company_id: profile?.company_id })
       }).then(res => res.json()).then(result => {
         if (result.sent) {
-          console.log(`📧 임박 알림 자동 발송 완료: ${result.recipients?.join(', ')}`)
         } else {
-          console.log('📧 임박 알림 없음:', result.reason)
         }
       }).catch(err => console.error('📧 임박 알림 발송 실패:', err))
 
@@ -884,7 +807,6 @@ export default function UploadPage() {
       alert('업로드 중 오류가 발생했습니다. F12 콘솔을 확인하세요.')
     } finally {
       setUploading(false)
-      console.log('🏁 [종료] 업로드 프로세스 종료')
     }
   }
 

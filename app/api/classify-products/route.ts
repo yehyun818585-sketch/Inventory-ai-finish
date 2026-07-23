@@ -13,7 +13,6 @@ export async function POST(request: Request) {
       return NextResponse.json({ suggest_off: [], needs_review: [] })
     }
 
-    console.log('🤖 [분류] 제품 분류 요청:', productNames.length, '개')
 
     const response = await openai.chat.completions.create({
       model: 'gpt-4o-mini',
@@ -64,12 +63,10 @@ JSON으로만 응답 (다른 텍스트 없이):
     })
 
     const content = response.choices[0]?.message?.content || '{}'
-    console.log('🤖 [분류] AI 응답:', content)
 
     const jsonMatch = content.match(/\{[\s\S]*\}/)
     if (jsonMatch) {
       const parsed = JSON.parse(jsonMatch[0])
-      console.log('🤖 [분류] suggest_off:', parsed.suggest_off || [], '/ needs_review:', parsed.needs_review || [])
       return NextResponse.json({
         suggest_off: parsed.suggest_off || [],
         needs_review: parsed.needs_review || []

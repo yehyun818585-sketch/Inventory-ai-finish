@@ -157,7 +157,6 @@ export async function POST(request: Request) {
       return NextResponse.json({ sent: false, reason: emailError.message })
     }
 
-    console.log(`📧 임박 알림 발송 완료 → ${recipients.join(', ')} (임박 ${expiring.length}건 / 만료 ${expired.length}건)`)
     return NextResponse.json({
       sent: true,
       recipients,

@@ -60,17 +60,11 @@ interface RequestBody {
 
 export async function POST(request: Request) {
   try {
-    console.log('📊 [AI 리포트] 데이터 수집 시작...')
 
     // 클라이언트에서 전달받은 데이터 사용
     const body: RequestBody = await request.json()
     const { inventory, transactions, warehouses, expiringLots } = body
 
-    console.log('📊 [DEBUG] 클라이언트 데이터 수신:')
-    console.log('  - inventory:', inventory?.length || 0, '개')
-    console.log('  - transactions:', transactions?.length || 0, '개')
-    console.log('  - warehouses:', warehouses?.length || 0, '개')
-    console.log('  - expiringLots:', expiringLots?.length || 0, '개')
 
     // 현재 월의 시작일 계산
     const today = new Date()
@@ -87,7 +81,6 @@ export async function POST(request: Request) {
       return txDate >= monthStart && txDate <= today
     })
 
-    console.log('📊 [DEBUG] 이번 달 트랜잭션:', monthTransactions.length, '개')
 
     // 데이터 요약 생성
     const inventorySummary = (inventory || []).map(i => ({
@@ -143,7 +136,6 @@ export async function POST(request: Request) {
       checkDate.setDate(checkDate.getDate() + 1)
     }
 
-    console.log('📊 [DEBUG] 출고 없는 평일:', noOutboundDays)
 
     // 유통기한 임박/만료 상품 (클라이언트에서 이미 계산된 데이터 사용)
     const expiringProducts = (expiringLots || []).map(lot => ({
@@ -157,7 +149,6 @@ export async function POST(request: Request) {
 
     // 만약 expiringLots가 없으면 inventory에서 직접 계산
     if (expiringProducts.length === 0 && inventory && inventory.length > 0) {
-      console.log('📊 [DEBUG] expiringLots가 없어서 직접 계산...')
 
       inventory.forEach(item => {
         // track_expiry가 false인 제품은 유통기한 계산 제외
@@ -206,7 +197,6 @@ export async function POST(request: Request) {
       expiringProducts.sort((a, b) => a.daysLeft - b.daysLeft)
     }
 
-    console.log('📊 [DEBUG] 임박/만료 상품:', expiringProducts.length, '개')
 
     // 제품별 이번 달 출고량 집계
     const outboundByProduct: Record<string, number> = {}
@@ -251,7 +241,6 @@ export async function POST(request: Request) {
 
     const orderRecommendations = stockRunoutDays.filter(p => p.needOrder)
 
-    console.log('📊 [AI 리포트] 데이터 수집 완료, AI 분석 시작...')
 
     const prompt = `당신은 재고관리 전문가입니다. 아래 데이터를 분석하여 한국어로 간결한 리포트를 작성해주세요.
 
@@ -323,7 +312,6 @@ ${expiringProducts.length > 0 ? expiringProducts.slice(0, 10).map(p =>
     })
 
     const report = response.choices[0]?.message?.content || '리포트 생성 실패'
-    console.log('📊 [AI 리포트] 생성 완료')
 
     return NextResponse.json({
       report,
