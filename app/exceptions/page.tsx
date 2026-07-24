@@ -221,8 +221,8 @@ export default function ExceptionsPage() {
       return
     }
 
-    if (!attachFile || !attachQty || Number(attachQty) <= 0) {
-      alert('파일과 수량을 입력해주세요.')
+    if (!attachFile) {
+      alert('파일을 선택해주세요.')
       return
     }
 
@@ -244,7 +244,7 @@ export default function ExceptionsPage() {
       )
       const updatePayload: Record<string, unknown> = {
         evidence_file_url: path,
-        evidence_quantity: Number(attachQty),
+        evidence_quantity: row.quantity,   // 실물수량 자동 (일괄첨부와 동일). 검증은 파일 대조가 담당.
         evidence_review_needed: !verify.verified,
         evidence_review_reason: verify.verified ? null : verify.reason,
         evidence_recorded_by: profile?.name || null
@@ -604,16 +604,6 @@ export default function ExceptionsPage() {
                                   accept="image/*,application/pdf"
                                   onChange={(ev) => setAttachFile(ev.target.files?.[0] || null)}
                                   className="text-sm"
-                                />
-                              </div>
-                              <div>
-                                <label className="block text-xs text-gray-500 mb-1">증빙상 수량</label>
-                                <input
-                                  type="number"
-                                  min="1"
-                                  value={attachQty}
-                                  onChange={(ev) => setAttachQty(ev.target.value)}
-                                  className="w-24 border rounded-lg px-2 py-1.5 text-sm"
                                 />
                               </div>
                             </>
