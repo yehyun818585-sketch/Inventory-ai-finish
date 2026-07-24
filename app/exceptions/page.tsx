@@ -67,7 +67,7 @@ export default function ExceptionsPage() {
   // "확정 대기 N건" 회색 문구를 눌러 어떤 건인지 같은 작은 글씨로 접었다 폈다 (별도 행 노출은 안 함)
   const [showAwaiting, setShowAwaiting] = useState(false)
 
-  // 출고 건 일괄 증빙 첨부 — 한 번의 집화(운송)로 여러 품목이 같이 나가면 증빙 파일도 하나뿐인데,
+  // 출고 건 일괄 증빙 첨부 — 한 번의 집하(운송)로 여러 품목이 같이 나가면 증빙 파일도 하나뿐인데,
   // 건별로 따로 첨부해야 했던 문제를 해결. 선택된 각 건은 자기 실물기록 수량을 그대로 증빙수량으로 씀
   // (수량을 다시 입력받게 하면 오타 등으로 실물기록과 어긋날 여지가 생겨, 그 여지 자체를 없앤 설계).
   const [selectedOutboundIds, setSelectedOutboundIds] = useState<Set<string>>(new Set())
@@ -265,7 +265,7 @@ export default function ExceptionsPage() {
         return
       }
 
-      // 선택된 건 각각, 자기 실물기록 수량 그대로를 증빙수량으로 저장 (같은 집화 건이므로 파일만 공유)
+      // 선택된 건 각각, 자기 실물기록 수량 그대로를 증빙수량으로 저장 (같은 집하 건이므로 파일만 공유)
       const targets = evidenceExceptions.filter(e => selectedOutboundIds.has(e.transaction_id))
       const results = await Promise.all(targets.map(t =>
         supabase.from('transactions').update({
@@ -431,7 +431,7 @@ export default function ExceptionsPage() {
             <div className="p-3 md:p-6">
               {selectedOutboundIds.size > 0 && (
                 <div className="mb-3 flex items-center justify-between bg-purple-50 border border-purple-200 rounded-lg px-3 py-2">
-                  <span className="text-sm text-purple-700">출고 {selectedOutboundIds.size}건 선택됨 — 같은 운송장(집화) 한 번에 나간 여러 품목이면 파일 하나로 일괄 첨부하세요.</span>
+                  <span className="text-sm text-purple-700">출고 {selectedOutboundIds.size}건 선택됨 — 같은 운송장(집하) 한 번에 나간 여러 품목이면 파일 하나로 일괄 첨부하세요.</span>
                   <div className="flex items-center gap-2">
                     <button onClick={() => setSelectedOutboundIds(new Set())} className="text-xs text-gray-500 hover:underline">선택 해제</button>
                     <button
