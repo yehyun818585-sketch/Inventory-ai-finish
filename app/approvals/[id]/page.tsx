@@ -499,7 +499,7 @@ export default function ApprovalDetailPage() {
                               </>
                             )}
                           </tr>
-                          {doc.doc_type === '출고지시서' && preview && (
+                          {doc.doc_type === '출고지시서' && preview && !completion?.isComplete && (
                             <tr>
                               <td className="border-x px-3 py-1.5 bg-blue-50" colSpan={3}>
                                 <span className="text-xs text-blue-700">
@@ -518,7 +518,7 @@ export default function ApprovalDetailPage() {
                     })}
                   </tbody>
                 </table>
-                {doc.doc_type === '출고지시서' && (
+                {doc.doc_type === '출고지시서' && !completion?.isComplete && (
                   <p className="text-xs text-gray-400 mt-1">
                     * 현재 재고 기준 예상치이며, 실제 피킹 시점 재고 변동에 따라 달라질 수 있습니다. (만료/임박 로트 제외, 오래된 로트부터 순서)
                   </p>
